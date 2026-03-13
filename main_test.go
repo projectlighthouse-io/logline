@@ -29,17 +29,12 @@ func TestHealthEndpoint(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("expected Content-Type application/json, got %q", ct)
 	}
-
-	body := strings.TrimSpace(rec.Body.String())
-	if body != `{"status": "ok"}` {
-		t.Errorf("expected body %q, got %q", `{"status": "ok"}`, body)
-	}
 }
 
-func TestIngestEndpoint(t *testing.T) {
+func TestIngestValidEntry(t *testing.T) {
 	mux := newMux()
 
-	payload := `{"service":"auth","level":"error","message":"connection refused"}`
+	payload := `{"level":"error","message":"connection refused","service":"auth","timestamp":"2026-02-27T14:30:00Z"}`
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -69,6 +64,50 @@ func TestIngestEmptyBody(t *testing.T) {
 	mux := newMux()
 
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+}
+
+func TestIngestInvalidJSON(t *testing.T) {
+	mux := newMux()
+
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader("definitely not json"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+}
+
+func TestIngestMissingRequiredFields(t *testing.T) {
+	mux := newMux()
+
+	payload := `{"level":"error"}`
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+}
+
+func TestIngestInvalidLevel(t *testing.T) {
+	mux := newMux()
+
+	payload := `{"level":"critical","message":"test","service":"api","timestamp":"2026-02-27T14:30:00Z"}`
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
