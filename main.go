@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"time"
 )
 
 func main() {
@@ -14,16 +13,10 @@ func main() {
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("POST /ingest", handleIngest)
 
-	srv := &http.Server{
-		Addr:         ":4000",
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	addr := ":4000"
 
-	log.Printf("logline starting on %s", srv.Addr)
-	log.Fatal(srv.ListenAndServe())
+	log.Printf("logline starting on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
