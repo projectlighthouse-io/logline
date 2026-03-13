@@ -26,9 +26,13 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
 
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
 	body := strings.TrimSpace(rec.Body.String())
-	if body != "ok" {
-		t.Errorf("expected body %q, got %q", "ok", body)
+	if body != `{"status": "ok"}` {
+		t.Errorf("expected body %q, got %q", `{"status": "ok"}`, body)
 	}
 }
 
@@ -44,6 +48,34 @@ func TestIngestEndpoint(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Errorf("expected status 201, got %d", rec.Code)
+	}
+}
+
+func TestIngestWrongContentType(t *testing.T) {
+	mux := newMux()
+
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader("not json"))
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("expected status 415, got %d", rec.Code)
+	}
+}
+
+func TestIngestEmptyBody(t *testing.T) {
+	mux := newMux()
+
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
 	}
 }
 
