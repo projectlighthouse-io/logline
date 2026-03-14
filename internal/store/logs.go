@@ -67,6 +67,93 @@ func (s *Store) InsertBatch(ctx context.Context, entries []domain.LogEntry) erro
 	return err
 }
 
+type LogFilter struct {
+	Level   string
+	Service string
+	From    time.Time
+	To      time.Time
+	Query   string
+	Cursor  int64
+	Limit   int
+}
+
+func (s *Store) QueryLogs(ctx context.Context, f LogFilter) ([]LogRow, error) {
+	var b strings.Builder
+	b.WriteString("SELECT id, level, message, service, timestamp, data, created_at FROM logs WHERE 1=1")
+	args := []any{}
+	argPos := 1
+
+	if f.Level != "" {
+		fmt.Fprintf(&b, " AND level = $%d", argPos)
+		args = append(args, f.Level)
+		argPos++
+	}
+
+	if f.Service != "" {
+		fmt.Fprintf(&b, " AND service = $%d", argPos)
+		args = append(args, f.Service)
+		argPos++
+	}
+
+	if !f.From.IsZero() {
+		fmt.Fprintf(&b, " AND timestamp >= $%d", argPos)
+		args = append(args, f.From)
+		argPos++
+	}
+
+	if !f.To.IsZero() {
+		fmt.Fprintf(&b, " AND timestamp <= $%d", argPos)
+		args = append(args, f.To)
+		argPos++
+	}
+
+	if f.Query != "" {
+		fmt.Fprintf(&b, " AND to_tsvector('english', message) @@ websearch_to_tsquery('english', $%d)", argPos)
+		args = append(args, f.Query)
+		argPos++
+	}
+
+	if f.Cursor > 0 {
+		fmt.Fprintf(&b, " AND id < $%d", argPos)
+		args = append(args, f.Cursor)
+		argPos++
+	}
+
+	b.WriteString(" ORDER BY id DESC")
+	fmt.Fprintf(&b, " LIMIT $%d", argPos)
+	args = append(args, f.Limit)
+
+	rows, err := s.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query logs: %w", err)
+	}
+	defer rows.Close()
+
+	var results []LogRow
+	for rows.Next() {
+		var r LogRow
+		var data []byte
+
+		if err := rows.Scan(&r.ID, &r.Level, &r.Message, &r.Service, &r.Timestamp, &data, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan log row: %w", err)
+		}
+
+		if data != nil {
+			if err := json.Unmarshal(data, &r.Data); err != nil {
+				return nil, fmt.Errorf("unmarshal data column: %w", err)
+			}
+		}
+
+		results = append(results, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate log rows: %w", err)
+	}
+
+	return results, nil
+}
+
 func (s *Store) CopyFrom(ctx context.Context, entries []domain.LogEntry) (int64, error) {
 	if len(entries) == 0 {
 		return 0, nil
