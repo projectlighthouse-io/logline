@@ -8,16 +8,22 @@ import (
 )
 
 type Config struct {
-	Port     int
-	Env      string
-	LogLevel string
+	Port        int
+	Env         string
+	LogLevel    string
+	DatabaseURL string
+	DBMaxConns  int
+	DBMaxIdle   int
 }
 
 func LoadConfig() (Config, error) {
 	cfg := Config{
-		Port:     4000,
-		Env:      "development",
-		LogLevel: "info",
+		Port:        4000,
+		Env:         "development",
+		LogLevel:    "info",
+		DatabaseURL: "postgres://logline:password@localhost:5432/logline?sslmode=disable",
+		DBMaxConns:  25,
+		DBMaxIdle:   5,
 	}
 
 	cfg.loadEnv()
@@ -46,6 +52,22 @@ func (c *Config) loadEnv() {
 
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		c.LogLevel = v
+	}
+
+	if v := os.Getenv("DATABASE_URL"); v != "" {
+		c.DatabaseURL = v
+	}
+
+	if v := os.Getenv("DB_MAX_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.DBMaxConns = n
+		}
+	}
+
+	if v := os.Getenv("DB_MAX_IDLE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.DBMaxIdle = n
+		}
 	}
 }
 
@@ -76,6 +98,18 @@ func (c *Config) validate() error {
 		// valid
 	default:
 		return fmt.Errorf("log-level must be one of: debug, info, warn, error — got %q", c.LogLevel)
+	}
+
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("database URL is required")
+	}
+
+	if c.DBMaxConns < 1 {
+		return fmt.Errorf("DB_MAX_CONNS must be at least 1, got %d", c.DBMaxConns)
+	}
+
+	if c.DBMaxIdle < 0 {
+		return fmt.Errorf("DB_MAX_IDLE must be non-negative, got %d", c.DBMaxIdle)
 	}
 
 	return nil

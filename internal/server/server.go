@@ -8,26 +8,27 @@ import (
 	"os"
 
 	"logline/internal/config"
+	"logline/internal/store"
 )
 
 type Server struct {
 	cfg    config.Config
 	logger *slog.Logger
+	store  *store.Store
 	mux    *http.ServeMux
 }
 
-func New(cfg config.Config) *Server {
-	logger := newLogger(cfg.Env, cfg.LogLevel)
-
-	s := &Server{
+func New(cfg config.Config, logger *slog.Logger, s *store.Store) *Server {
+	srv := &Server{
 		cfg:    cfg,
 		logger: logger,
+		store:  s,
 		mux:    http.NewServeMux(),
 	}
 
-	s.registerRoutes()
+	srv.registerRoutes()
 
-	return s
+	return srv
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +40,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /ingest", s.handleIngest)
 }
 
-func newLogger(env, level string) *slog.Logger {
+func NewLogger(env, level string) *slog.Logger {
 	var handler slog.Handler
 
 	opts := &slog.HandlerOptions{

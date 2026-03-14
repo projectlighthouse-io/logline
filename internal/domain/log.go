@@ -18,6 +18,11 @@ type StatusResponse struct {
 	Status string `json:"status"`
 }
 
+const (
+	MaxServiceLen = 128
+	MaxMessageLen = 4096 // 4 KB
+)
+
 func ValidateLogEntry(entry LogEntry) string {
 	if entry.Level == "" {
 		return "level is required"
@@ -37,6 +42,14 @@ func ValidateLogEntry(entry LogEntry) string {
 		// valid
 	default:
 		return "level must be one of: debug, info, warn, error, fatal"
+	}
+
+	if len(entry.Service) > MaxServiceLen {
+		return "service must be 128 characters or fewer"
+	}
+
+	if len(entry.Message) > MaxMessageLen {
+		return "message must be 4096 characters or fewer"
 	}
 
 	return ""

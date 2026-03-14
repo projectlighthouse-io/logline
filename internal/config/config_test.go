@@ -6,9 +6,12 @@ import (
 
 func TestDefaults(t *testing.T) {
 	cfg := Config{
-		Port:     4000,
-		Env:      "development",
-		LogLevel: "info",
+		Port:        4000,
+		Env:         "development",
+		LogLevel:    "info",
+		DatabaseURL: "postgres://localhost/test",
+		DBMaxConns:  25,
+		DBMaxIdle:   5,
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -32,7 +35,7 @@ func TestValidatePort(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := Config{Port: tt.port, Env: "development", LogLevel: "info"}
+			cfg := Config{Port: tt.port, Env: "development", LogLevel: "info", DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
 			err := cfg.validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("port=%d: wantErr=%v, got %v", tt.port, tt.wantErr, err)
@@ -55,7 +58,7 @@ func TestValidateEnv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := Config{Port: 4000, Env: tt.env, LogLevel: "info"}
+			cfg := Config{Port: 4000, Env: tt.env, LogLevel: "info", DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
 			err := cfg.validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("env=%q: wantErr=%v, got %v", tt.env, tt.wantErr, err)
@@ -80,7 +83,7 @@ func TestValidateLogLevel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := Config{Port: 4000, Env: "development", LogLevel: tt.level}
+			cfg := Config{Port: 4000, Env: "development", LogLevel: tt.level, DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
 			err := cfg.validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("level=%q: wantErr=%v, got %v", tt.level, tt.wantErr, err)
@@ -116,7 +119,7 @@ func TestLoadEnvOverridesDefaults(t *testing.T) {
 func TestLoadEnvIgnoresInvalidPort(t *testing.T) {
 	t.Setenv("PORT", "not-a-number")
 
-	cfg := Config{Port: 4000, Env: "development", LogLevel: "info"}
+	cfg := Config{Port: 4000, Env: "development", LogLevel: "info", DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
 	cfg.loadEnv()
 
 	if cfg.Port != 4000 {
