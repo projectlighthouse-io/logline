@@ -14,6 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"logline/internal/config"
+	"logline/internal/database"
 	"logline/internal/store"
 )
 
@@ -51,6 +52,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		t.Fatalf("connecting to database: %v", err)
+	}
+
+	if err := database.Migrate(ctx, db); err != nil {
+		db.Close()
+		t.Fatalf("running migrations: %v", err)
 	}
 
 	t.Cleanup(func() { db.Close() })

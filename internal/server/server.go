@@ -1,21 +1,21 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"os"
 
 	"logline/internal/config"
+	"logline/internal/middleware"
 	"logline/internal/store"
 )
 
 type Server struct {
-	cfg    config.Config
-	logger *slog.Logger
-	store  *store.Store
-	mux    *http.ServeMux
+	cfg     config.Config
+	logger  *slog.Logger
+	store   *store.Store
+	mux     *http.ServeMux
+	handler http.Handler
 }
 
 func New(cfg config.Config, logger *slog.Logger, s *store.Store) *Server {
@@ -28,11 +28,18 @@ func New(cfg config.Config, logger *slog.Logger, s *store.Store) *Server {
 
 	srv.registerRoutes()
 
+	srv.handler = middleware.Chain(
+		srv.mux,
+		middleware.Recovery(logger),
+		middleware.RequestID,
+		middleware.Logging(logger),
+	)
+
 	return srv
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *Server) registerRoutes() {
@@ -71,13 +78,4 @@ func parseLogLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-func generateTraceID() string {
-	b := make([]byte, 16)
-	_, err := rand.Read(b)
-	if err != nil {
-		return "unknown"
-	}
-	return hex.EncodeToString(b)
 }

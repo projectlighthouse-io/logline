@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"logline/internal/database"
 	"logline/internal/domain"
 	"logline/internal/store"
 )
@@ -35,7 +36,11 @@ func setupBenchDB(b *testing.B) *sql.DB {
 		b.Fatalf("connecting to database: %v", err)
 	}
 
-	// truncate before each benchmark
+	if err := database.Migrate(ctx, db); err != nil {
+		db.Close()
+		b.Fatalf("running migrations: %v", err)
+	}
+
 	if _, err := db.ExecContext(ctx, "TRUNCATE logs"); err != nil {
 		db.Close()
 		b.Fatalf("truncating logs: %v", err)

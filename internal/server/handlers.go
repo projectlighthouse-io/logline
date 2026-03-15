@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"logline/internal/domain"
+	"logline/internal/middleware"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -29,9 +30,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
-	// todo: move trace ID generation to a middleware and pass it via context
-	traceID := generateTraceID()
-	logger := s.logger.With(slog.String("trace_id", traceID))
+	requestID := middleware.GetRequestID(r.Context())
+	logger := s.logger.With(slog.String("request_id", requestID))
 
 	if r.Header.Get("Content-Type") != "application/json" {
 		logger.Warn("unsupported content type",
