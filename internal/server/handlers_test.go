@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"logline/internal/auth"
 	"logline/internal/config"
 	"logline/internal/database"
 	"logline/internal/store"
@@ -64,15 +65,27 @@ func setupTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func newTestServer(t *testing.T) *Server {
+func newTestServer(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
 	db := setupTestDB(t)
 	s := store.New(db)
-	return New(testConfig(), testLogger(), s)
+	aks := auth.NewApiKeyStore(db)
+	return New(testConfig(), testLogger(), s, aks), db
+}
+
+// creates an API key for the given service and returns the raw key
+func createTestKey(t *testing.T, db *sql.DB, service string) string {
+	t.Helper()
+	aks := auth.NewApiKeyStore(db)
+	rawKey, err := aks.Create(context.Background(), "test-key", service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rawKey
 }
 
 func TestHandleHealth_OK(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -91,7 +104,8 @@ func TestHandleHealth_OK(t *testing.T) {
 func TestHandleHealth_DBDown(t *testing.T) {
 	db := setupTestDB(t)
 	s := store.New(db)
-	srv := New(testConfig(), testLogger(), s)
+	aks := auth.NewApiKeyStore(db)
+	srv := New(testConfig(), testLogger(), s, aks)
 
 	db.Close()
 
@@ -106,11 +120,19 @@ func TestHandleHealth_DBDown(t *testing.T) {
 }
 
 func TestIngestValidEntry(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
+
+	// create an API key for the "auth" service
+	aks := auth.NewApiKeyStore(db)
+	rawKey, err := aks.Create(context.Background(), "test-key", "auth")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	payload := `{"level":"error","message":"connection refused","service":"auth","timestamp":"2026-02-27T14:30:00Z"}`
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+rawKey)
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
@@ -121,10 +143,12 @@ func TestIngestValidEntry(t *testing.T) {
 }
 
 func TestIngestWrongContentType(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
+	key := createTestKey(t, db, "api")
 
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
@@ -135,10 +159,12 @@ func TestIngestWrongContentType(t *testing.T) {
 }
 
 func TestIngestEmptyBody(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
+	key := createTestKey(t, db, "api")
 
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(""))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
@@ -149,10 +175,12 @@ func TestIngestEmptyBody(t *testing.T) {
 }
 
 func TestIngestInvalidJSON(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
+	key := createTestKey(t, db, "api")
 
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader("definitely not json"))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
@@ -163,11 +191,13 @@ func TestIngestInvalidJSON(t *testing.T) {
 }
 
 func TestIngestMissingRequiredFields(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
+	key := createTestKey(t, db, "api")
 
 	payload := `{"level":"error"}`
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
@@ -178,11 +208,13 @@ func TestIngestMissingRequiredFields(t *testing.T) {
 }
 
 func TestIngestInvalidLevel(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
+	key := createTestKey(t, db, "api")
 
 	payload := `{"level":"critical","message":"test","service":"api","timestamp":"2026-02-27T14:30:00Z"}`
 	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
@@ -193,7 +225,7 @@ func TestIngestInvalidLevel(t *testing.T) {
 }
 
 func TestUnknownRouteReturns404(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	rec := httptest.NewRecorder()
@@ -206,7 +238,7 @@ func TestUnknownRouteReturns404(t *testing.T) {
 }
 
 func TestWrongMethodReturns405(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/ingest", nil)
 	rec := httptest.NewRecorder()

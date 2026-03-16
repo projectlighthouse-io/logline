@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"logline/internal/auth"
 	"logline/internal/config"
 	"logline/internal/database"
 	"logline/internal/server"
@@ -47,7 +48,8 @@ func run() error {
 	logger.Info("migrations applied")
 
 	s := store.New(db)
-	srv := server.New(cfg, logger, s)
+	aks := auth.NewApiKeyStore(db)
+	srv := server.New(cfg, logger, s, aks)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	logger.Info("logline starting",

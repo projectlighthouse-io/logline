@@ -5,25 +5,28 @@ import (
 	"net/http"
 	"os"
 
+	"logline/internal/auth"
 	"logline/internal/config"
 	"logline/internal/middleware"
 	"logline/internal/store"
 )
 
 type Server struct {
-	cfg     config.Config
-	logger  *slog.Logger
-	store   *store.Store
-	mux     *http.ServeMux
-	handler http.Handler
+	cfg         config.Config
+	logger      *slog.Logger
+	store       *store.Store
+	apiKeyStore *auth.ApiKeyStore
+	mux         *http.ServeMux
+	handler     http.Handler
 }
 
-func New(cfg config.Config, logger *slog.Logger, s *store.Store) *Server {
+func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKeyStore) *Server {
 	srv := &Server{
-		cfg:    cfg,
-		logger: logger,
-		store:  s,
-		mux:    http.NewServeMux(),
+		cfg:         cfg,
+		logger:      logger,
+		store:       s,
+		apiKeyStore: aks,
+		mux:         http.NewServeMux(),
 	}
 
 	srv.registerRoutes()
@@ -44,7 +47,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
-	s.mux.HandleFunc("POST /ingest", s.handleIngest)
+	s.mux.HandleFunc("POST /api/keys", s.handleCreateAPIKey)
+
+	authMiddleware := auth.Middleware(s.apiKeyStore)
+	s.mux.Handle("POST /ingest", authMiddleware(http.HandlerFunc(s.handleIngest)))
 }
 
 func NewLogger(env, level string) *slog.Logger {

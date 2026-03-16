@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"logline/internal/auth"
 	"logline/internal/domain"
 	"logline/internal/middleware"
 )
@@ -80,6 +82,19 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// service scoping: key can only ingest for its own service
+	apiKey := auth.KeyFromContext(r.Context())
+	if apiKey != nil && apiKey.Service != entry.Service {
+		logger.Warn("service mismatch",
+			slog.String("key_service", apiKey.Service),
+			slog.String("entry_service", entry.Service),
+		)
+		writeJSON(w, http.StatusForbidden, domain.ErrorResponse{
+			Error: fmt.Sprintf("api key is scoped to service %q, not %q", apiKey.Service, entry.Service),
+		})
+		return
+	}
+
 	if err := s.store.InsertLog(r.Context(), entry); err != nil {
 		logger.Error("failed to store log entry",
 			slog.String("error", err.Error()),
@@ -97,6 +112,40 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	)
 
 	writeJSON(w, http.StatusCreated, domain.StatusResponse{Status: "accepted"})
+}
+
+func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name    string `json:"name"`
+		Service string `json:"service"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, domain.ErrorResponse{Error: "invalid JSON"})
+		return
+	}
+
+	if req.Name == "" || req.Service == "" {
+		writeJSON(w, http.StatusBadRequest, domain.ErrorResponse{Error: "name and service are required"})
+		return
+	}
+
+	rawKey, err := s.apiKeyStore.Create(r.Context(), req.Name, req.Service)
+	if err != nil {
+		s.logger.Error("failed to create api key", slog.String("error", err.Error()))
+		writeJSON(w, http.StatusInternalServerError, domain.ErrorResponse{Error: "failed to create api key"})
+		return
+	}
+
+	s.logger.Info("api key created",
+		slog.String("name", req.Name),
+		slog.String("service", req.Service),
+	)
+
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"key":     rawKey,
+		"message": "Store this key securely. It will not be shown again.",
+	})
 }
 
 const maxBodySize = 1_048_576 // 1 MB
