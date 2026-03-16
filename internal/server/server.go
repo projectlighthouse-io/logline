@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ type Server struct {
 	userStore        *auth.UserStore
 	sessionStore     *auth.SessionStore
 	rateLimiterStore *middleware.RateLimiterStore
+	templates        map[string]*template.Template
 	mux              *http.ServeMux
 	handler          http.Handler
 }
@@ -38,6 +40,7 @@ func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKe
 		userStore:        us,
 		sessionStore:     ss,
 		rateLimiterStore: middleware.NewRateLimiterStore(cfg.RateLimit, cfg.RateLimitBurst, 5*time.Minute),
+		templates:        newTemplateCache("templates"),
 		mux:              http.NewServeMux(),
 	}
 
@@ -75,6 +78,11 @@ func (s *Server) registerRoutes() {
 
 	// session protected
 	s.mux.Handle("GET /logs", s.requireSession(http.HandlerFunc(s.handleListLogs)))
+
+	// dashboard (session protected, HTML)
+	s.mux.HandleFunc("GET /dashboard/login", s.handleLoginPage)
+	s.mux.HandleFunc("POST /dashboard/login", s.handleLoginSubmit)
+	s.mux.Handle("GET /dashboard/logs", s.requireSession(http.HandlerFunc(s.handleDashboardLogs)))
 }
 
 func (s *Server) requireSession(next http.Handler) http.Handler {

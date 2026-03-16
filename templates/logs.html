@@ -1,0 +1,38 @@
+{{define "title"}}Logs | logline{{end}}
+
+{{define "content"}}
+<div class="overflow-hidden rounded-lg border border-gray-200 bg-white">
+    <div class="overflow-x-auto scrollbar-thin">
+        <table class="w-full text-left text-sm">
+            <thead class="border-b border-gray-200 bg-gray-50">
+                <tr>
+                    <th class="px-4 py-2 font-medium text-gray-500">Level</th>
+                    <th class="px-4 py-2 font-medium text-gray-500">Service</th>
+                    <th class="px-4 py-2 font-medium text-gray-500">Message</th>
+                    <th class="px-4 py-2 font-medium text-gray-500">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {{range .Logs}}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5"><span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium {{levelClass .Level}}">{{.Level}}</span></td>
+                    <td class="px-4 py-2.5 font-mono text-xs">{{.Service}}</td>
+                    <td class="px-4 py-2.5 text-gray-700">{{.Message}}</td>
+                    <td class="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-gray-500">{{formatTime .Timestamp}}</td>
+                </tr>
+                {{else}}
+                <tr>
+                    <td colspan="4" class="px-4 py-8 text-center text-sm text-gray-500">No logs found</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+    {{if .NextCursor}}
+    <div class="flex items-center justify-between border-t border-gray-200 px-4 py-3">
+        <span class="text-sm text-gray-500">Cursor: {{.NextCursor}}</span>
+        <a href="/dashboard/logs?cursor={{.NextCursor}}" class="rounded-md bg-gray-100 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200">Next Page →</a>
+    </div>
+    {{end}}
+</div>
+{{end}}

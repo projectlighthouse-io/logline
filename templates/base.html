@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{block "title" .}}logline{{end}}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { mono: ['JetBrains Mono', 'monospace'] },
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+
+    {{block "nav" .}}
+    <nav class="border-b border-gray-200 bg-white">
+        <div class="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
+            <div class="flex items-center gap-6">
+                <span class="font-mono text-lg font-bold tracking-tight">logline</span>
+                <div class="flex gap-1">
+                    <a href="/dashboard/logs" class="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white">Logs</a>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <form method="POST" action="/logout">
+                    <button type="submit" class="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">Logout</button>
+                </form>
+            </div>
+        </div>
+    </nav>
+    {{end}}
+
+    <div class="mx-auto max-w-7xl px-4 py-6">
+        {{block "content" .}}{{end}}
+    </div>
+
+</body>
+</html>

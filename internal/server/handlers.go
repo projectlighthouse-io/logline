@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"logline/internal/auth"
 	"logline/internal/domain"
 	"logline/internal/middleware"
+	"logline/internal/store"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -307,6 +309,118 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "ok",
+	})
+}
+
+type dashboardData struct {
+	Logs       []store.LogRow
+	NextCursor int64
+	Error      string
+}
+
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	s.render(w, http.StatusOK, "login.html", dashboardData{})
+}
+
+func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.render(w, http.StatusBadRequest, "login.html", dashboardData{
+			Error: "invalid form data",
+		})
+		return
+	}
+
+	email := r.FormValue("email")
+	password := r.FormValue("password")
+
+	if email == "" || password == "" {
+		s.render(w, http.StatusBadRequest, "login.html", dashboardData{
+			Error: "email and password are required",
+		})
+		return
+	}
+
+	user, err := s.userStore.GetByEmail(r.Context(), email)
+	if err != nil {
+		// timing attack defense: run bcrypt even when user not found
+		bcrypt.CompareHashAndPassword([]byte("$2a$12$dummy"), []byte(password))
+
+		s.render(w, http.StatusUnauthorized, "login.html", dashboardData{
+			Error: "invalid email or password",
+		})
+		return
+	}
+
+	if err := auth.VerifyPassword(user.PasswordHash, password); err != nil {
+		s.render(w, http.StatusUnauthorized, "login.html", dashboardData{
+			Error: "invalid email or password",
+		})
+		return
+	}
+
+	token, err := s.sessionStore.Create(r.Context(), user.ID)
+	if err != nil {
+		s.logger.Error("failed to create session",
+			slog.String("error", err.Error()),
+			slog.Int64("user_id", user.ID),
+		)
+		s.render(w, http.StatusInternalServerError, "login.html", dashboardData{
+			Error: "internal error",
+		})
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   s.cfg.Env != "development",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   86400,
+	})
+
+	http.Redirect(w, r, "/dashboard/logs", http.StatusSeeOther)
+}
+
+func (s *Server) handleDashboardLogs(w http.ResponseWriter, r *http.Request) {
+	f := store.LogFilter{
+		Limit: 50,
+	}
+
+	if level := r.URL.Query().Get("level"); level != "" {
+		f.Level = level
+	}
+
+	if service := r.URL.Query().Get("service"); service != "" {
+		f.Service = service
+	}
+
+	if q := r.URL.Query().Get("q"); q != "" {
+		f.Query = q
+	}
+
+	if cursor := r.URL.Query().Get("cursor"); cursor != "" {
+		if v, err := strconv.ParseInt(cursor, 10, 64); err == nil {
+			f.Cursor = v
+		}
+	}
+
+	logs, err := s.store.QueryLogs(r.Context(), f)
+	if err != nil {
+		s.logger.Error("failed to query logs", slog.String("error", err.Error()))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	var nextCursor int64
+	if len(logs) == f.Limit {
+		nextCursor = logs[len(logs)-1].ID
+	}
+
+	s.render(w, http.StatusOK, "logs.html", dashboardData{
+		Logs:       logs,
+		NextCursor: nextCursor,
 	})
 }
 
