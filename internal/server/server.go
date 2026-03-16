@@ -18,25 +18,27 @@ type contextKey string
 const userContextKey contextKey = "user"
 
 type Server struct {
-	cfg          config.Config
-	logger       *slog.Logger
-	store        *store.Store
-	apiKeyStore  *auth.ApiKeyStore
-	userStore    *auth.UserStore
-	sessionStore *auth.SessionStore
-	mux          *http.ServeMux
-	handler      http.Handler
+	cfg              config.Config
+	logger           *slog.Logger
+	store            *store.Store
+	apiKeyStore      *auth.ApiKeyStore
+	userStore        *auth.UserStore
+	sessionStore     *auth.SessionStore
+	rateLimiterStore *middleware.RateLimiterStore
+	mux              *http.ServeMux
+	handler          http.Handler
 }
 
 func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKeyStore, us *auth.UserStore, ss *auth.SessionStore) *Server {
 	srv := &Server{
-		cfg:          cfg,
-		logger:       logger,
-		store:        s,
-		apiKeyStore:  aks,
-		userStore:    us,
-		sessionStore: ss,
-		mux:          http.NewServeMux(),
+		cfg:              cfg,
+		logger:           logger,
+		store:            s,
+		apiKeyStore:      aks,
+		userStore:        us,
+		sessionStore:     ss,
+		rateLimiterStore: middleware.NewRateLimiterStore(cfg.RateLimit, cfg.RateLimitBurst, 5*time.Minute),
+		mux:              http.NewServeMux(),
 	}
 
 	srv.registerRoutes()
@@ -46,6 +48,7 @@ func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKe
 		middleware.Recovery(logger),
 		middleware.RequestID,
 		middleware.Logging(logger),
+		middleware.CORS(cfg.CORSOrigins),
 	)
 
 	go srv.startSessionCleanup(context.Background())
@@ -64,9 +67,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /login", s.handleLogin)
 	s.mux.HandleFunc("POST /logout", s.handleLogout)
 
-	// api key protected
+	// api key protected, rate limited
 	authMiddleware := auth.Middleware(s.apiKeyStore)
-	s.mux.Handle("POST /ingest", authMiddleware(http.HandlerFunc(s.handleIngest)))
+	rateLimitMiddleware := middleware.RateLimit(s.rateLimiterStore)
+	s.mux.Handle("POST /ingest", authMiddleware(rateLimitMiddleware(http.HandlerFunc(s.handleIngest))))
 	s.mux.HandleFunc("POST /api/keys", s.handleCreateAPIKey)
 
 	// session protected

@@ -21,12 +21,14 @@ import (
 
 func testConfig() config.Config {
 	return config.Config{
-		Port:        4000,
-		Env:         "development",
-		LogLevel:    "info",
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		DBMaxConns:  5,
-		DBMaxIdle:   2,
+		Port:           4000,
+		Env:            "development",
+		LogLevel:       "info",
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		DBMaxConns:     5,
+		DBMaxIdle:      2,
+		RateLimit:      10000,
+		RateLimitBurst: 10000,
 	}
 }
 

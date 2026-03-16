@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -12,8 +13,11 @@ type Config struct {
 	Env         string
 	LogLevel    string
 	DatabaseURL string
-	DBMaxConns  int
-	DBMaxIdle   int
+	DBMaxConns     int
+	DBMaxIdle      int
+	RateLimit      float64
+	RateLimitBurst int
+	CORSOrigins    []string
 }
 
 func LoadConfig() (Config, error) {
@@ -22,8 +26,11 @@ func LoadConfig() (Config, error) {
 		Env:         "development",
 		LogLevel:    "info",
 		DatabaseURL: "postgres://logline:password@localhost:5433/logline?sslmode=disable",
-		DBMaxConns:  25,
-		DBMaxIdle:   5,
+		DBMaxConns:     25,
+		DBMaxIdle:      5,
+		RateLimit:      100,
+		RateLimitBurst: 200,
+		CORSOrigins:    []string{},
 	}
 
 	cfg.loadEnv()
@@ -68,6 +75,22 @@ func (c *Config) loadEnv() {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.DBMaxIdle = n
 		}
+	}
+
+	if v := os.Getenv("RATE_LIMIT"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.RateLimit = f
+		}
+	}
+
+	if v := os.Getenv("RATE_LIMIT_BURST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.RateLimitBurst = n
+		}
+	}
+
+	if v := os.Getenv("CORS_ORIGINS"); v != "" {
+		c.CORSOrigins = strings.Split(v, ",")
 	}
 }
 
