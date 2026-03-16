@@ -70,7 +70,9 @@ func newTestServer(t *testing.T) (*Server, *sql.DB) {
 	db := setupTestDB(t)
 	s := store.New(db)
 	aks := auth.NewApiKeyStore(db)
-	return New(testConfig(), testLogger(), s, aks), db
+	us := auth.NewUserStore(db)
+	ss := auth.NewSessionStore(db)
+	return New(testConfig(), testLogger(), s, aks, us, ss), db
 }
 
 // creates an API key for the given service and returns the raw key
@@ -105,7 +107,9 @@ func TestHandleHealth_DBDown(t *testing.T) {
 	db := setupTestDB(t)
 	s := store.New(db)
 	aks := auth.NewApiKeyStore(db)
-	srv := New(testConfig(), testLogger(), s, aks)
+	us := auth.NewUserStore(db)
+	ss := auth.NewSessionStore(db)
+	srv := New(testConfig(), testLogger(), s, aks, us, ss)
 
 	db.Close()
 

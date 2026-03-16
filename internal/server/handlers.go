@@ -12,6 +12,8 @@ import (
 	"logline/internal/auth"
 	"logline/internal/domain"
 	"logline/internal/middleware"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -145,6 +147,166 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"key":     rawKey,
 		"message": "Store this key securely. It will not be shown again.",
+	})
+}
+
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Name     string `json:"name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, domain.ErrorResponse{
+			Error: "invalid request body",
+		})
+		return
+	}
+
+	if req.Email == "" || req.Password == "" || req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, domain.ErrorResponse{
+			Error: "email, password, and name are required",
+		})
+		return
+	}
+
+	if len(req.Password) < 8 {
+		writeJSON(w, http.StatusBadRequest, domain.ErrorResponse{
+			Error: "password must be at least 8 characters",
+		})
+		return
+	}
+
+	user, err := s.userStore.Create(r.Context(), req.Email, req.Password, req.Name)
+	if err != nil {
+		if auth.IsUniqueViolation(err) {
+			writeJSON(w, http.StatusConflict, domain.ErrorResponse{
+				Error: "email already registered",
+			})
+			return
+		}
+
+		s.logger.Error("failed to create user",
+			slog.String("error", err.Error()),
+		)
+		writeJSON(w, http.StatusInternalServerError, domain.ErrorResponse{
+			Error: "internal error",
+		})
+		return
+	}
+
+	s.logger.Info("user registered",
+		slog.Int64("user_id", user.ID),
+		slog.String("email", user.Email),
+	)
+
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"message": "account created",
+	})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, domain.ErrorResponse{
+			Error: "invalid request body",
+		})
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		writeJSON(w, http.StatusBadRequest, domain.ErrorResponse{
+			Error: "email and password are required",
+		})
+		return
+	}
+
+	user, err := s.userStore.GetByEmail(r.Context(), req.Email)
+	if err != nil {
+		// run bcrypt anyway so the response time is the same whether the email exists or not.
+		// without this, an attacker can distinguish "email not found" (~1ms) from
+		// "wrong password" (~250ms) by timing the response.
+		bcrypt.CompareHashAndPassword([]byte("$2a$12$dummy"), []byte(req.Password))
+
+		writeJSON(w, http.StatusUnauthorized, domain.ErrorResponse{
+			Error: "invalid email or password",
+		})
+		return
+	}
+
+	if err := auth.VerifyPassword(user.PasswordHash, req.Password); err != nil {
+		writeJSON(w, http.StatusUnauthorized, domain.ErrorResponse{
+			Error: "invalid email or password",
+		})
+		return
+	}
+
+	token, err := s.sessionStore.Create(r.Context(), user.ID)
+	if err != nil {
+		s.logger.Error("failed to create session",
+			slog.String("error", err.Error()),
+			slog.Int64("user_id", user.ID),
+		)
+		writeJSON(w, http.StatusInternalServerError, domain.ErrorResponse{
+			Error: "internal error",
+		})
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   s.cfg.Env != "development",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   86400,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "logged in",
+	})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"message": "logged out",
+		})
+		return
+	}
+
+	if err := s.sessionStore.Delete(r.Context(), cookie.Value); err != nil {
+		s.logger.Error("failed to delete session",
+			slog.String("error", err.Error()),
+		)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   s.cfg.Env != "development",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "logged out",
+	})
+}
+
+// todo: implement log listing with query params
+func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "ok",
 	})
 }
 

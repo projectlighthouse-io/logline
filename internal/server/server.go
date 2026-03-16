@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"logline/internal/auth"
 	"logline/internal/config"
@@ -11,22 +13,30 @@ import (
 	"logline/internal/store"
 )
 
+type contextKey string
+
+const userContextKey contextKey = "user"
+
 type Server struct {
-	cfg         config.Config
-	logger      *slog.Logger
-	store       *store.Store
-	apiKeyStore *auth.ApiKeyStore
-	mux         *http.ServeMux
-	handler     http.Handler
+	cfg          config.Config
+	logger       *slog.Logger
+	store        *store.Store
+	apiKeyStore  *auth.ApiKeyStore
+	userStore    *auth.UserStore
+	sessionStore *auth.SessionStore
+	mux          *http.ServeMux
+	handler      http.Handler
 }
 
-func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKeyStore) *Server {
+func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKeyStore, us *auth.UserStore, ss *auth.SessionStore) *Server {
 	srv := &Server{
-		cfg:         cfg,
-		logger:      logger,
-		store:       s,
-		apiKeyStore: aks,
-		mux:         http.NewServeMux(),
+		cfg:          cfg,
+		logger:       logger,
+		store:        s,
+		apiKeyStore:  aks,
+		userStore:    us,
+		sessionStore: ss,
+		mux:          http.NewServeMux(),
 	}
 
 	srv.registerRoutes()
@@ -38,6 +48,8 @@ func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKe
 		middleware.Logging(logger),
 	)
 
+	go srv.startSessionCleanup(context.Background())
+
 	return srv
 }
 
@@ -46,11 +58,83 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerRoutes() {
+	// public
 	s.mux.HandleFunc("GET /health", s.handleHealth)
-	s.mux.HandleFunc("POST /api/keys", s.handleCreateAPIKey)
+	s.mux.HandleFunc("POST /register", s.handleRegister)
+	s.mux.HandleFunc("POST /login", s.handleLogin)
+	s.mux.HandleFunc("POST /logout", s.handleLogout)
 
+	// api key protected
 	authMiddleware := auth.Middleware(s.apiKeyStore)
 	s.mux.Handle("POST /ingest", authMiddleware(http.HandlerFunc(s.handleIngest)))
+	s.mux.HandleFunc("POST /api/keys", s.handleCreateAPIKey)
+
+	// session protected
+	s.mux.Handle("GET /logs", s.requireSession(http.HandlerFunc(s.handleListLogs)))
+}
+
+func (s *Server) requireSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("session_token")
+		if err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "authentication required",
+			})
+			return
+		}
+
+		_, user, err := s.sessionStore.Validate(r.Context(), cookie.Value)
+		if err != nil {
+			// clear the invalid cookie
+			http.SetCookie(w, &http.Cookie{
+				Name:     "session_token",
+				Value:    "",
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   s.cfg.Env != "development",
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   -1,
+			})
+
+			writeJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "authentication required",
+			})
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), userContextKey, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func userFromContext(ctx context.Context) *auth.User {
+	user, _ := ctx.Value(userContextKey).(*auth.User)
+	return user
+}
+
+func (s *Server) startSessionCleanup(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			count, err := s.sessionStore.DeleteExpired(ctx)
+			if err != nil {
+				s.logger.Error("session cleanup failed",
+					slog.String("error", err.Error()),
+				)
+				continue
+			}
+			if count > 0 {
+				s.logger.Info("expired sessions cleaned up",
+					slog.Int64("count", count),
+				)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func NewLogger(env, level string) *slog.Logger {

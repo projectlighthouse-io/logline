@@ -49,7 +49,9 @@ func run() error {
 
 	s := store.New(db)
 	aks := auth.NewApiKeyStore(db)
-	srv := server.New(cfg, logger, s, aks)
+	us := auth.NewUserStore(db)
+	ss := auth.NewSessionStore(db)
+	srv := server.New(cfg, logger, s, aks, us, ss)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	logger.Info("logline starting",
