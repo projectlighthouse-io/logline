@@ -1,6 +1,47 @@
 {{define "title"}}Logs | logline{{end}}
 
 {{define "content"}}
+<form method="GET" action="/dashboard/logs" class="mb-4 rounded-lg border border-gray-200 bg-white p-4">
+    <div class="flex flex-wrap items-end gap-3">
+        <div>
+            <label class="mb-1 block text-xs font-medium text-gray-500">Level</label>
+            <select name="level" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm">
+                <option value="">All levels</option>
+                <option value="debug"{{if eq .Filter.Level "debug"}} selected{{end}}>debug</option>
+                <option value="info"{{if eq .Filter.Level "info"}} selected{{end}}>info</option>
+                <option value="warn"{{if eq .Filter.Level "warn"}} selected{{end}}>warn</option>
+                <option value="error"{{if eq .Filter.Level "error"}} selected{{end}}>error</option>
+                <option value="fatal"{{if eq .Filter.Level "fatal"}} selected{{end}}>fatal</option>
+            </select>
+        </div>
+        <div>
+            <label class="mb-1 block text-xs font-medium text-gray-500">Service</label>
+            <select name="service" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm">
+                <option value="">All services</option>
+                {{range .Services}}
+                <option value="{{.}}"{{if eq $.Filter.Service .}} selected{{end}}>{{.}}</option>
+                {{end}}
+            </select>
+        </div>
+        <div>
+            <label class="mb-1 block text-xs font-medium text-gray-500">From</label>
+            <input type="date" name="from" value="{{.Filter.FromDate}}" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm" />
+        </div>
+        <div>
+            <label class="mb-1 block text-xs font-medium text-gray-500">To</label>
+            <input type="date" name="to" value="{{.Filter.ToDate}}" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm" />
+        </div>
+        <div class="flex-1">
+            <label class="mb-1 block text-xs font-medium text-gray-500">Search</label>
+            <input type="text" name="q" value="{{.Filter.Query}}" placeholder="Search messages..." class="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm" />
+        </div>
+        <div class="flex gap-2">
+            <button type="submit" class="rounded-md bg-gray-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-800">Filter</button>
+            <a href="/dashboard/logs" class="rounded-md border border-gray-200 px-4 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50">Clear</a>
+        </div>
+    </div>
+</form>
+
 <div class="overflow-hidden rounded-lg border border-gray-200 bg-white">
     <div class="overflow-x-auto scrollbar-thin">
         <table class="w-full text-left text-sm">
@@ -28,10 +69,10 @@
             </tbody>
         </table>
     </div>
-    {{if .NextCursor}}
+    {{if .HasMore}}
     <div class="flex items-center justify-between border-t border-gray-200 px-4 py-3">
-        <span class="text-sm text-gray-500">Cursor: {{.NextCursor}}</span>
-        <a href="/dashboard/logs?cursor={{.NextCursor}}" class="rounded-md bg-gray-100 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200">Next Page →</a>
+        <span class="text-sm text-gray-500">Showing {{len .Logs}} logs</span>
+        <a href="/dashboard/logs{{queryString .Filter .NextCursor}}" class="rounded-md bg-gray-100 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200">Next Page &rarr;</a>
     </div>
     {{end}}
 </div>

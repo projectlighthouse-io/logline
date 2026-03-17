@@ -312,6 +312,15 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type logViewerData struct {
+	Logs       []store.LogRow
+	Filter     store.LogFilter
+	Services   []string
+	NextCursor int64
+	HasMore    bool
+	Error      string
+}
+
 type dashboardData struct {
 	Logs       []store.LogRow
 	NextCursor int64
@@ -388,21 +397,35 @@ func (s *Server) handleDashboardLogs(w http.ResponseWriter, r *http.Request) {
 		Limit: 50,
 	}
 
-	if level := r.URL.Query().Get("level"); level != "" {
-		f.Level = level
-	}
+	q := r.URL.Query()
 
-	if service := r.URL.Query().Get("service"); service != "" {
-		f.Service = service
+	if v := q.Get("level"); v != "" {
+		f.Level = v
 	}
-
-	if q := r.URL.Query().Get("q"); q != "" {
-		f.Query = q
+	if v := q.Get("service"); v != "" {
+		f.Service = v
 	}
-
-	if cursor := r.URL.Query().Get("cursor"); cursor != "" {
-		if v, err := strconv.ParseInt(cursor, 10, 64); err == nil {
-			f.Cursor = v
+	if v := q.Get("q"); v != "" {
+		f.Query = v
+	}
+	if v := q.Get("from"); v != "" {
+		if t, err := parseTime(v); err == nil {
+			f.From = t
+		}
+	}
+	if v := q.Get("to"); v != "" {
+		if t, err := parseTime(v); err == nil {
+			f.To = t
+		}
+	}
+	if v := q.Get("cursor"); v != "" {
+		if c, err := strconv.ParseInt(v, 10, 64); err == nil {
+			f.Cursor = c
+		}
+	}
+	if v := q.Get("limit"); v != "" {
+		if l, err := strconv.Atoi(v); err == nil && l > 0 && l <= 200 {
+			f.Limit = l
 		}
 	}
 
@@ -413,15 +436,34 @@ func (s *Server) handleDashboardLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	services, err := s.store.ListServices(r.Context())
+	if err != nil {
+		s.logger.Error("failed to list services", slog.String("error", err.Error()))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	var nextCursor int64
-	if len(logs) == f.Limit {
+	hasMore := len(logs) == f.Limit
+	if hasMore {
 		nextCursor = logs[len(logs)-1].ID
 	}
 
-	s.render(w, http.StatusOK, "logs.html", dashboardData{
+	s.render(w, http.StatusOK, "logs.html", logViewerData{
 		Logs:       logs,
+		Filter:     f,
+		Services:   services,
 		NextCursor: nextCursor,
+		HasMore:    hasMore,
 	})
+}
+
+// parseTime tries RFC3339 first, then date-only format
+func parseTime(v string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t, nil
+	}
+	return time.Parse("2006-01-02", v)
 }
 
 const maxBodySize = 1_048_576 // 1 MB

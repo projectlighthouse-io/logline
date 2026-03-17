@@ -149,6 +149,109 @@ func TestQueryLogs_FullTextSearch(t *testing.T) {
 	}
 }
 
+func TestListServices(t *testing.T) {
+	db := setupTestDB(t)
+	s := store.New(db)
+	ctx := context.Background()
+
+	for _, svc := range []string{"gateway", "api", "worker"} {
+		if err := s.InsertLog(ctx, domain.LogEntry{
+			Level: "info", Message: "test", Service: svc, Timestamp: time.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// duplicate to verify DISTINCT works
+	if err := s.InsertLog(ctx, domain.LogEntry{
+		Level: "error", Message: "test", Service: "api", Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	services, err := s.ListServices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := []string{"api", "gateway", "worker"}
+	if len(services) != len(expected) {
+		t.Fatalf("expected %d services, got %d: %v", len(expected), len(services), services)
+	}
+
+	for i, svc := range expected {
+		if services[i] != svc {
+			t.Errorf("expected services[%d] = %q, got %q", i, svc, services[i])
+		}
+	}
+}
+
+func TestQueryLogs_FilterByService(t *testing.T) {
+	db := setupTestDB(t)
+	s := store.New(db)
+	ctx := context.Background()
+
+	for _, svc := range []string{"api", "api", "api", "gateway", "gateway"} {
+		if err := s.InsertLog(ctx, domain.LogEntry{
+			Level: "info", Message: "test", Service: svc, Timestamp: time.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	results, err := s.QueryLogs(ctx, store.LogFilter{Service: "api", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) != 3 {
+		t.Errorf("expected 3 api logs, got %d", len(results))
+	}
+
+	for _, r := range results {
+		if r.Service != "api" {
+			t.Errorf("expected service api, got %q", r.Service)
+		}
+	}
+}
+
+func TestQueryLogs_DateRange(t *testing.T) {
+	db := setupTestDB(t)
+	s := store.New(db)
+	ctx := context.Background()
+
+	// insert logs at different times
+	times := []time.Time{
+		time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 2, 15, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
+	}
+
+	for i, ts := range times {
+		if err := s.InsertLog(ctx, domain.LogEntry{
+			Level: "info", Message: fmt.Sprintf("entry %d", i),
+			Service: "api", Timestamp: ts,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// filter: only february
+	from := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 2, 28, 23, 59, 59, 0, time.UTC)
+
+	results, err := s.QueryLogs(ctx, store.LogFilter{From: from, To: to, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("expected 2 february logs, got %d", len(results))
+	}
+}
+
 func TestQueryLogs_NoFilters(t *testing.T) {
 	db := setupTestDB(t)
 	s := store.New(db)

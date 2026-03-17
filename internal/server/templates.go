@@ -6,9 +6,13 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
+
+	"logline/internal/store"
 )
 
 var templateFuncs = template.FuncMap{
@@ -31,6 +35,31 @@ var templateFuncs = template.FuncMap{
 	},
 	"add": func(a, b int) int {
 		return a + b
+	},
+	"queryString": func(f store.LogFilter, cursor int64) string {
+		v := url.Values{}
+		if f.Level != "" {
+			v.Set("level", f.Level)
+		}
+		if f.Service != "" {
+			v.Set("service", f.Service)
+		}
+		if f.Query != "" {
+			v.Set("q", f.Query)
+		}
+		if !f.From.IsZero() {
+			v.Set("from", f.FromDate())
+		}
+		if !f.To.IsZero() {
+			v.Set("to", f.ToDate())
+		}
+		if cursor > 0 {
+			v.Set("cursor", strconv.FormatInt(cursor, 10))
+		}
+		if encoded := v.Encode(); encoded != "" {
+			return "?" + encoded
+		}
+		return ""
 	},
 }
 

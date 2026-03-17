@@ -77,6 +77,39 @@ type LogFilter struct {
 	Limit   int
 }
 
+func (f LogFilter) FromDate() string {
+	if f.From.IsZero() {
+		return ""
+	}
+	return f.From.Format("2006-01-02")
+}
+
+func (f LogFilter) ToDate() string {
+	if f.To.IsZero() {
+		return ""
+	}
+	return f.To.Format("2006-01-02")
+}
+
+func (s *Store) ListServices(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT DISTINCT service FROM logs ORDER BY service")
+	if err != nil {
+		return nil, fmt.Errorf("list services: %w", err)
+	}
+	defer rows.Close()
+
+	var services []string
+	for rows.Next() {
+		var svc string
+		if err := rows.Scan(&svc); err != nil {
+			return nil, fmt.Errorf("scan service: %w", err)
+		}
+		services = append(services, svc)
+	}
+
+	return services, rows.Err()
+}
+
 func (s *Store) QueryLogs(ctx context.Context, f LogFilter) ([]LogRow, error) {
 	var b strings.Builder
 	b.WriteString("SELECT id, level, message, service, timestamp, data, created_at FROM logs WHERE 1=1")
