@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -455,6 +456,68 @@ func (s *Server) handleDashboardLogs(w http.ResponseWriter, r *http.Request) {
 		Services:   services,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
+	})
+}
+
+type dashboardOverviewData struct {
+	ErrorsPerHour   []store.TimeBucket
+	VolumeByService []store.ServiceCount
+	TopErrors       []store.MessageCount
+	ErrorsJSON      template.JS
+	VolumeJSON      template.JS
+}
+
+func (s *Server) handleDashboardOverview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	errors, err := s.store.ErrorsPerHour(ctx)
+	if err != nil {
+		s.logger.Error("failed to query errors per hour", slog.String("error", err.Error()))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	volume, err := s.store.VolumeByService(ctx)
+	if err != nil {
+		s.logger.Error("failed to query volume by service", slog.String("error", err.Error()))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	topErrors, err := s.store.TopErrors(ctx)
+	if err != nil {
+		s.logger.Error("failed to query top errors", slog.String("error", err.Error()))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	filled := store.FillHourGaps(errors)
+
+	errorsJSON, err := json.Marshal(filled)
+	if err != nil {
+		s.logger.Error("failed to marshal errors json", slog.String("error", err.Error()))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	volumeJSON, err := json.Marshal(volume)
+	if err != nil {
+		s.logger.Error("failed to marshal volume json", slog.String("error", err.Error()))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// default to empty array for chart.js
+	if volume == nil {
+		volumeJSON = []byte("[]")
+	}
+
+	s.render(w, http.StatusOK, "dashboard.html", dashboardOverviewData{
+		ErrorsPerHour:   filled,
+		VolumeByService: volume,
+		TopErrors:       topErrors,
+		ErrorsJSON:      template.JS(errorsJSON),
+		VolumeJSON:      template.JS(volumeJSON),
 	})
 }
 

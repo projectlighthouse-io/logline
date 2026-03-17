@@ -82,6 +82,7 @@ func (s *Server) registerRoutes() {
 	// dashboard (session protected, HTML)
 	s.mux.HandleFunc("GET /dashboard/login", s.handleLoginPage)
 	s.mux.HandleFunc("POST /dashboard/login", s.handleLoginSubmit)
+	s.mux.Handle("GET /dashboard", s.requireSession(http.HandlerFunc(s.handleDashboardOverview)))
 	s.mux.Handle("GET /dashboard/logs", s.requireSession(http.HandlerFunc(s.handleDashboardLogs)))
 }
 

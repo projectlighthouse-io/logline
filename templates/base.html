@@ -28,7 +28,8 @@
             <div class="flex items-center gap-6">
                 <span class="font-mono text-lg font-bold tracking-tight">logline</span>
                 <div class="flex gap-1">
-                    <a href="/dashboard/logs" class="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white">Logs</a>
+                    <a href="/dashboard" class="rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Overview</a>
+                    <a href="/dashboard/logs" class="rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Logs</a>
                 </div>
             </div>
             <div class="flex items-center gap-3">
@@ -44,5 +45,6 @@
         {{block "content" .}}{{end}}
     </div>
 
+    {{block "scripts" .}}{{end}}
 </body>
 </html>

@@ -71,7 +71,7 @@ func newTemplateCache(dir string) map[string]*template.Template {
 		return cache
 	}
 
-	pages := []string{"logs.html", "login.html"}
+	pages := []string{"logs.html", "login.html", "dashboard.html"}
 
 	for _, page := range pages {
 		name := filepath.Base(page)
