@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"logline/internal/config"
 	"logline/internal/middleware"
 	"logline/internal/store"
+	"logline/internal/web"
 )
 
 type contextKey string
@@ -64,6 +66,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerRoutes() {
+	// static files — in dev serve from disk, in prod use embedded fs
+	var staticFS fs.FS
+	if s.cfg.Env == "development" {
+		staticFS = os.DirFS("internal/web/static")
+	} else {
+		sub, err := fs.Sub(web.StaticFS, "static")
+		if err != nil {
+			s.logger.Error("failed to create static sub-fs", slog.String("error", err.Error()))
+		}
+		staticFS = sub
+	}
+
+	if staticFS != nil {
+		etags, err := web.ComputeETags(staticFS)
+		if err != nil {
+			s.logger.Error("failed to compute etags", slog.String("error", err.Error()))
+		}
+		s.mux.Handle("GET /static/", http.StripPrefix("/static/", web.CachingFileServer(staticFS, etags)))
+	}
+
 	// public
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("POST /register", s.handleRegister)

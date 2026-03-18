@@ -45,7 +45,8 @@
 {{end}}
 
 {{define "scripts"}}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="/static/js/chart.min.js"></script>
+<script src="/static/js/chart-config.js"></script>
 <script>
     const errorsData = {{.ErrorsJSON}};
     const volumeData = {{.VolumeJSON}};
