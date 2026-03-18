@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -19,10 +18,10 @@ type Session struct {
 }
 
 type SessionStore struct {
-	db *sql.DB
+	db DBTX
 }
 
-func NewSessionStore(db *sql.DB) *SessionStore {
+func NewSessionStore(db DBTX) *SessionStore {
 	return &SessionStore{db: db}
 }
 

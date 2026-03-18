@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -21,10 +20,10 @@ type User struct {
 }
 
 type UserStore struct {
-	db *sql.DB
+	db DBTX
 }
 
-func NewUserStore(db *sql.DB) *UserStore {
+func NewUserStore(db DBTX) *UserStore {
 	return &UserStore{db: db}
 }
 

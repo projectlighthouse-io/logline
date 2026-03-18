@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -308,7 +309,12 @@ func (s *Store) CopyFrom(ctx context.Context, entries []domain.LogEntry) (int64,
 		return 0, nil
 	}
 
-	conn, err := s.db.Conn(ctx)
+	db, ok := s.db.(*sql.DB)
+	if !ok {
+		return 0, fmt.Errorf("CopyFrom requires *sql.DB, got %T", s.db)
+	}
+
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("acquiring connection: %w", err)
 	}
