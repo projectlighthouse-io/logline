@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +30,9 @@ func testConfig() config.Config {
 		DBMaxIdle:      2,
 		RateLimit:      10000,
 		RateLimitBurst: 10000,
+		Version:        "test",
+		Commit:         "abc123",
+		BuildTime:      "2026-01-01T00:00:00Z",
 	}
 }
 
@@ -118,6 +122,21 @@ func TestHealthEndpoint_AlwaysOK(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 during shutdown, got %d", rec.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	for _, field := range []string{"status", "version", "commit", "build_time"} {
+		if _, ok := body[field]; !ok {
+			t.Errorf("expected %q field in health response", field)
+		}
+	}
+
+	if body["version"] != "test" {
+		t.Errorf("expected version %q, got %q", "test", body["version"])
 	}
 }
 

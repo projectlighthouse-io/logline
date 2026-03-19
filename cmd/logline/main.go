@@ -20,6 +20,13 @@ import (
 	"logline/internal/worker"
 )
 
+// set at build time via -ldflags
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -32,6 +39,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
+
+	cfg.Version = version
+	cfg.Commit = commit
+	cfg.BuildTime = buildTime
 
 	logger := server.NewLogger(cfg.Env, cfg.LogLevel)
 

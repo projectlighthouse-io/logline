@@ -19,6 +19,9 @@ type Config struct {
 	RateLimitBurst int
 	CORSOrigins    []string
 	RetentionDays  int
+	Version        string
+	Commit         string
+	BuildTime      string
 }
 
 func LoadConfig() (Config, error) {

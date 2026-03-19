@@ -21,7 +21,12 @@ import (
 
 // liveness probe — always returns 200
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, domain.StatusResponse{Status: "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":     "ok",
+		"version":    s.cfg.Version,
+		"commit":     s.cfg.Commit,
+		"build_time": s.cfg.BuildTime,
+	})
 }
 
 // readiness probe — checks shutdown flag and database connectivity
