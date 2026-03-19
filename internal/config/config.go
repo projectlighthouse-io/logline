@@ -9,15 +9,16 @@ import (
 )
 
 type Config struct {
-	Port        int
-	Env         string
-	LogLevel    string
-	DatabaseURL string
+	Port           int
+	Env            string
+	LogLevel       string
+	DatabaseURL    string
 	DBMaxConns     int
 	DBMaxIdle      int
 	RateLimit      float64
 	RateLimitBurst int
 	CORSOrigins    []string
+	RetentionDays  int
 }
 
 func LoadConfig() (Config, error) {
@@ -31,6 +32,7 @@ func LoadConfig() (Config, error) {
 		RateLimit:      100,
 		RateLimitBurst: 200,
 		CORSOrigins:    []string{},
+		RetentionDays:  30,
 	}
 
 	cfg.loadEnv()
@@ -91,6 +93,12 @@ func (c *Config) loadEnv() {
 
 	if v := os.Getenv("CORS_ORIGINS"); v != "" {
 		c.CORSOrigins = strings.Split(v, ",")
+	}
+
+	if v := os.Getenv("RETENTION_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.RetentionDays = n
+		}
 	}
 }
 

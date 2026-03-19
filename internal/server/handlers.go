@@ -19,12 +19,25 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// liveness probe — always returns 200
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, domain.StatusResponse{Status: "ok"})
+}
+
+// readiness probe — checks shutdown flag and database connectivity
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if s.shuttingDown.Load() {
+		writeJSON(w, http.StatusServiceUnavailable, domain.ErrorResponse{
+			Error: "server is shutting down",
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
 	if err := s.store.Ping(ctx); err != nil {
-		s.logger.Error("health check failed: database unreachable",
+		s.logger.Error("readiness check failed: database unreachable",
 			slog.String("error", err.Error()),
 		)
 		writeJSON(w, http.StatusServiceUnavailable, domain.ErrorResponse{

@@ -15,6 +15,7 @@ type BufferedStore struct {
 	buf       []domain.LogEntry
 	batchSize int
 	interval  time.Duration
+	stop      chan struct{}
 	done      chan struct{}
 }
 
@@ -24,6 +25,7 @@ func NewBufferedStore(store *Store, batchSize int, interval time.Duration) *Buff
 		buf:       make([]domain.LogEntry, 0, batchSize),
 		batchSize: batchSize,
 		interval:  interval,
+		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
 	}
 	go bs.flushLoop()
@@ -65,6 +67,8 @@ func (bs *BufferedStore) flush() {
 }
 
 func (bs *BufferedStore) flushLoop() {
+	defer close(bs.done)
+
 	ticker := time.NewTicker(bs.interval)
 	defer ticker.Stop()
 
@@ -72,7 +76,7 @@ func (bs *BufferedStore) flushLoop() {
 		select {
 		case <-ticker.C:
 			bs.flush()
-		case <-bs.done:
+		case <-bs.stop:
 			bs.flush()
 			return
 		}
@@ -80,5 +84,6 @@ func (bs *BufferedStore) flushLoop() {
 }
 
 func (bs *BufferedStore) Close() {
-	close(bs.done)
+	close(bs.stop)
+	<-bs.done
 }

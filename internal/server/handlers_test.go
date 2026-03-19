@@ -105,23 +105,47 @@ func TestHandleHealth_OK(t *testing.T) {
 	}
 }
 
-func TestHandleHealth_DBDown(t *testing.T) {
-	db := setupTestDB(t)
-	s := store.New(db)
-	aks := auth.NewApiKeyStore(db)
-	us := auth.NewUserStore(db)
-	ss := auth.NewSessionStore(db)
-	srv := New(testConfig(), testLogger(), s, aks, us, ss)
+func TestHealthEndpoint_AlwaysOK(t *testing.T) {
+	srv, _ := newTestServer(t)
 
-	db.Close()
+	// health should return 200 even during shutdown
+	srv.SetShuttingDown()
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 during shutdown, got %d", rec.Code)
+	}
+}
+
+func TestReadyEndpoint_OK(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestReadyEndpoint_ShuttingDown(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	srv.SetShuttingDown()
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", rec.Code)
+		t.Fatalf("expected 503 during shutdown, got %d", rec.Code)
 	}
 }
 

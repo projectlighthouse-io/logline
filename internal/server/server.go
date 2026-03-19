@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"logline/internal/auth"
@@ -31,6 +32,7 @@ type Server struct {
 	templates        map[string]*template.Template
 	mux              *http.ServeMux
 	handler          http.Handler
+	shuttingDown     atomic.Bool
 }
 
 func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKeyStore, us *auth.UserStore, ss *auth.SessionStore) *Server {
@@ -65,6 +67,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
+func (s *Server) SetShuttingDown() {
+	s.shuttingDown.Store(true)
+}
+
 func (s *Server) registerRoutes() {
 	// static files — in dev serve from disk, in prod use embedded fs
 	var staticFS fs.FS
@@ -88,6 +94,7 @@ func (s *Server) registerRoutes() {
 
 	// public
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /ready", s.handleReady)
 	s.mux.HandleFunc("POST /register", s.handleRegister)
 	s.mux.HandleFunc("POST /login", s.handleLogin)
 	s.mux.HandleFunc("POST /logout", s.handleLogout)
