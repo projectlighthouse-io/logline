@@ -3,9 +3,15 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -13,8 +19,10 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"logline/internal/auth"
+	"logline/internal/config"
 	"logline/internal/database"
 	"logline/internal/domain"
+	"logline/internal/server"
 	"logline/internal/store"
 )
 
@@ -74,7 +82,7 @@ func newTestTx(t *testing.T) *sql.Tx {
 
 func TestIntegration_IngestAndQuery(t *testing.T) {
 	tx := newTestTx(t)
-	s := store.New(tx)
+	logStore := store.New(tx)
 	ctx := context.Background()
 
 	entry := domain.LogEntry{
@@ -85,11 +93,11 @@ func TestIntegration_IngestAndQuery(t *testing.T) {
 		Data:      map[string]any{"host": "10.0.0.1", "port": 5432},
 	}
 
-	if err := s.InsertLog(ctx, entry); err != nil {
+	if err := logStore.InsertLog(ctx, entry); err != nil {
 		t.Fatalf("inserting log: %v", err)
 	}
 
-	results, err := s.QueryLogs(ctx, store.LogFilter{
+	results, err := logStore.QueryLogs(ctx, store.LogFilter{
 		Level:   "error",
 		Service: "gateway",
 		Limit:   10,
@@ -119,10 +127,10 @@ func TestIntegration_IngestAndQuery(t *testing.T) {
 
 func TestIntegration_APIKeyLifecycle(t *testing.T) {
 	tx := newTestTx(t)
-	aks := auth.NewApiKeyStore(tx)
+	apiKeyStore := auth.NewApiKeyStore(tx)
 	ctx := context.Background()
 
-	rawKey, err := aks.Create(ctx, "test-key", "integration-svc")
+	rawKey, err := apiKeyStore.Create(ctx, "test-key", "integration-svc")
 	if err != nil {
 		t.Fatalf("creating api key: %v", err)
 	}
@@ -132,7 +140,7 @@ func TestIntegration_APIKeyLifecycle(t *testing.T) {
 	}
 
 	// validate the key
-	key, err := aks.Validate(ctx, rawKey)
+	key, err := apiKeyStore.Validate(ctx, rawKey)
 	if err != nil {
 		t.Fatalf("validating api key: %v", err)
 	}
@@ -147,12 +155,12 @@ func TestIntegration_APIKeyLifecycle(t *testing.T) {
 	}
 
 	// revoke the key
-	if err := aks.Revoke(ctx, key.ID); err != nil {
+	if err := apiKeyStore.Revoke(ctx, key.ID); err != nil {
 		t.Fatalf("revoking api key: %v", err)
 	}
 
 	// validate again — should still return the key but with RevokedAt set
-	revoked, err := aks.Validate(ctx, rawKey)
+	revoked, err := apiKeyStore.Validate(ctx, rawKey)
 	if err != nil {
 		t.Fatalf("validating revoked api key: %v", err)
 	}
@@ -163,22 +171,22 @@ func TestIntegration_APIKeyLifecycle(t *testing.T) {
 
 func TestIntegration_ListServicesDistinct(t *testing.T) {
 	tx := newTestTx(t)
-	s := store.New(tx)
+	logStore := store.New(tx)
 	ctx := context.Background()
 
 	services := []string{"gateway", "api", "worker", "api", "gateway", "auth"}
-	for _, svc := range services {
-		if err := s.InsertLog(ctx, domain.LogEntry{
+	for _, service := range services {
+		if err := logStore.InsertLog(ctx, domain.LogEntry{
 			Level:     "info",
-			Message:   fmt.Sprintf("log from %s", svc),
-			Service:   svc,
+			Message:   fmt.Sprintf("log from %s", service),
+			Service:   service,
 			Timestamp: time.Now().UTC(),
 		}); err != nil {
-			t.Fatalf("inserting log for service %q: %v", svc, err)
+			t.Fatalf("inserting log for service %q: %v", service, err)
 		}
 	}
 
-	result, err := s.ListServices(ctx)
+	result, err := logStore.ListServices(ctx)
 	if err != nil {
 		t.Fatalf("listing services: %v", err)
 	}
@@ -188,9 +196,168 @@ func TestIntegration_ListServicesDistinct(t *testing.T) {
 		t.Fatalf("expected %d services, got %d: %v", len(expected), len(result), result)
 	}
 
-	for i, svc := range expected {
-		if result[i] != svc {
-			t.Errorf("services[%d]: got %q, want %q", i, result[i], svc)
+	for i, service := range expected {
+		if result[i] != service {
+			t.Errorf("services[%d]: got %q, want %q", i, result[i], service)
 		}
+	}
+}
+
+// newTestServer wires a full server (routes, middleware, handlers) on top of
+// the test transaction and starts it on a random port.
+func newTestServer(t *testing.T, tx *sql.Tx) *httptest.Server {
+	t.Helper()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	cfg := config.Config{
+		Env:            "test",
+		RateLimit:      10000,
+		RateLimitBurst: 10000,
+	}
+
+	srv := server.New(cfg, logger,
+		store.New(tx),
+		auth.NewApiKeyStore(tx),
+		auth.NewUserStore(tx),
+		auth.NewSessionStore(tx),
+	)
+
+	testServer := httptest.NewServer(srv)
+	t.Cleanup(testServer.Close)
+
+	return testServer
+}
+
+func createTestAPIKey(t *testing.T, apiKeyStore *auth.ApiKeyStore, service string) string {
+	t.Helper()
+
+	rawKey, err := apiKeyStore.Create(context.Background(), "test-key", service)
+	if err != nil {
+		t.Fatalf("creating test API key: %v", err)
+	}
+
+	return rawKey
+}
+
+func ingestLog(t *testing.T, baseURL, apiKey string, entry map[string]any) *http.Response {
+	t.Helper()
+
+	body, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshaling entry: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/ingest", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("sending request: %v", err)
+	}
+
+	return resp
+}
+
+func TestIngestAndQuery(t *testing.T) {
+	tx := newTestTx(t)
+	testServer := newTestServer(t, tx)
+
+	apiKey := createTestAPIKey(t, auth.NewApiKeyStore(tx), "payments")
+
+	resp := ingestLog(t, testServer.URL, apiKey, map[string]any{
+		"level":     "error",
+		"message":   "payment gateway timeout",
+		"service":   "payments",
+		"timestamp": "2026-02-27T15:30:00Z",
+		"data": map[string]any{
+			"gateway":    "stripe",
+			"timeout_ms": 5000,
+		},
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, body)
+	}
+
+	logs, err := store.New(tx).QueryLogs(context.Background(), store.LogFilter{
+		Service: "payments",
+		Level:   "error",
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("querying logs: %v", err)
+	}
+
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+
+	if logs[0].Message != "payment gateway timeout" {
+		t.Errorf("expected message %q, got %q", "payment gateway timeout", logs[0].Message)
+	}
+
+	if logs[0].Data["gateway"] != "stripe" {
+		t.Errorf("expected data.gateway %q, got %v", "stripe", logs[0].Data["gateway"])
+	}
+}
+
+func TestIngestWithoutAPIKey(t *testing.T) {
+	tx := newTestTx(t)
+	testServer := newTestServer(t, tx)
+
+	resp := ingestLog(t, testServer.URL, "", map[string]any{
+		"level":     "info",
+		"message":   "test",
+		"service":   "test",
+		"timestamp": "2026-02-27T15:30:00Z",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestIngestWrongService(t *testing.T) {
+	tx := newTestTx(t)
+	testServer := newTestServer(t, tx)
+
+	apiKey := createTestAPIKey(t, auth.NewApiKeyStore(tx), "payments")
+
+	resp := ingestLog(t, testServer.URL, apiKey, map[string]any{
+		"level":     "info",
+		"message":   "test",
+		"service":   "billing",
+		"timestamp": "2026-02-27T15:30:00Z",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", resp.StatusCode)
+	}
+}
+
+func TestQueryNoResults(t *testing.T) {
+	tx := newTestTx(t)
+	logStore := store.New(tx)
+
+	logs, err := logStore.QueryLogs(context.Background(), store.LogFilter{
+		Service: "nonexistent",
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("expected no error for empty result, got %v", err)
+	}
+
+	if len(logs) != 0 {
+		t.Errorf("expected 0 logs, got %d", len(logs))
 	}
 }

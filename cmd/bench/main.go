@@ -33,10 +33,10 @@ func main() {
 	payload := []byte(`{"level":"info","message":"bench entry","service":"bench","timestamp":"2026-03-01T00:00:00Z"}`)
 
 	var (
-		success atomic.Int64
-		failed  atomic.Int64
-		mu      sync.Mutex
-		latencies []time.Duration
+		success        atomic.Int64
+		failed         atomic.Int64
+		latenciesMutex sync.Mutex
+		latencies      []time.Duration
 	)
 
 	latencies = make([]time.Duration, 0, total)
@@ -51,18 +51,18 @@ func main() {
 		},
 	}
 
-	var wg sync.WaitGroup
+	var waitGroup sync.WaitGroup
 
 	start := time.Now()
 
 	for w := 0; w < concurrency; w++ {
-		wg.Add(1)
+		waitGroup.Add(1)
 		go func() {
-			defer wg.Done()
+			defer waitGroup.Done()
 			for range work {
-				t := time.Now()
+				requestStart := time.Now()
 				resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
-				d := time.Since(t)
+				elapsed := time.Since(requestStart)
 
 				if err != nil {
 					failed.Add(1)
@@ -76,9 +76,9 @@ func main() {
 					failed.Add(1)
 				}
 
-				mu.Lock()
-				latencies = append(latencies, d)
-				mu.Unlock()
+				latenciesMutex.Lock()
+				latencies = append(latencies, elapsed)
+				latenciesMutex.Unlock()
 			}
 		}()
 	}
@@ -87,7 +87,7 @@ func main() {
 		work <- i
 	}
 	close(work)
-	wg.Wait()
+	waitGroup.Wait()
 
 	elapsed := time.Since(start)
 
@@ -111,10 +111,10 @@ func main() {
 	}
 }
 
-func percentile(sorted []time.Duration, p float64) time.Duration {
-	idx := int(float64(len(sorted)) * p)
-	if idx >= len(sorted) {
-		idx = len(sorted) - 1
+func percentile(sorted []time.Duration, fraction float64) time.Duration {
+	index := int(float64(len(sorted)) * fraction)
+	if index >= len(sorted) {
+		index = len(sorted) - 1
 	}
-	return sorted[idx]
+	return sorted[index]
 }

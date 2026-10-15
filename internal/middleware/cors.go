@@ -6,8 +6,8 @@ import (
 
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(allowedOrigins))
-	for _, o := range allowedOrigins {
-		allowed[o] = true
+	for _, origin := range allowedOrigins {
+		allowed[origin] = true
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -17,6 +17,9 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+
+			// the response depends on the Origin header, so caches must key on it
+			w.Header().Add("Vary", "Origin")
 
 			if !allowed[origin] {
 				next.ServeHTTP(w, r)

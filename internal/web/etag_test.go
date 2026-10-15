@@ -9,12 +9,12 @@ import (
 )
 
 func TestComputeETags(t *testing.T) {
-	fs := fstest.MapFS{
+	testFS := fstest.MapFS{
 		"a.txt": &fstest.MapFile{Data: []byte("hello")},
 		"b.txt": &fstest.MapFile{Data: []byte("world")},
 	}
 
-	etags, err := ComputeETags(fs)
+	etags, err := ComputeETags(testFS)
 	if err != nil {
 		t.Fatalf("ComputeETags returned error: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestComputeETags(t *testing.T) {
 	}
 
 	// deterministic: computing again should produce same values
-	etags2, err := ComputeETags(fs)
+	etags2, err := ComputeETags(testFS)
 	if err != nil {
 		t.Fatalf("second ComputeETags returned error: %v", err)
 	}
@@ -55,16 +55,16 @@ func TestComputeETags(t *testing.T) {
 }
 
 func TestCachingFileServer_SetsHeaders(t *testing.T) {
-	fs := fstest.MapFS{
+	testFS := fstest.MapFS{
 		"style.css": &fstest.MapFile{Data: []byte("body{}")},
 	}
 
-	etags, err := ComputeETags(fs)
+	etags, err := ComputeETags(testFS)
 	if err != nil {
 		t.Fatalf("ComputeETags: %v", err)
 	}
 
-	handler := CachingFileServer(fs, etags)
+	handler := CachingFileServer(testFS, etags)
 
 	req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
 	rec := httptest.NewRecorder()
@@ -79,22 +79,22 @@ func TestCachingFileServer_SetsHeaders(t *testing.T) {
 		t.Errorf("ETag header = %q, want %q", got, etags["style.css"])
 	}
 
-	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=86400" {
-		t.Errorf("Cache-Control = %q, want %q", got, "public, max-age=86400")
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q, want %q", got, "no-cache")
 	}
 }
 
 func TestCachingFileServer_304OnMatch(t *testing.T) {
-	fs := fstest.MapFS{
+	testFS := fstest.MapFS{
 		"style.css": &fstest.MapFile{Data: []byte("body{}")},
 	}
 
-	etags, err := ComputeETags(fs)
+	etags, err := ComputeETags(testFS)
 	if err != nil {
 		t.Fatalf("ComputeETags: %v", err)
 	}
 
-	handler := CachingFileServer(fs, etags)
+	handler := CachingFileServer(testFS, etags)
 
 	req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
 	req.Header.Set("If-None-Match", etags["style.css"])
@@ -112,16 +112,16 @@ func TestCachingFileServer_304OnMatch(t *testing.T) {
 }
 
 func TestCachingFileServer_200OnMismatchedETag(t *testing.T) {
-	fs := fstest.MapFS{
+	testFS := fstest.MapFS{
 		"style.css": &fstest.MapFile{Data: []byte("body{color:red}")},
 	}
 
-	etags, err := ComputeETags(fs)
+	etags, err := ComputeETags(testFS)
 	if err != nil {
 		t.Fatalf("ComputeETags: %v", err)
 	}
 
-	handler := CachingFileServer(fs, etags)
+	handler := CachingFileServer(testFS, etags)
 
 	req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
 	req.Header.Set("If-None-Match", `"wrong-etag"`)
@@ -139,45 +139,45 @@ func TestCachingFileServer_200OnMismatchedETag(t *testing.T) {
 }
 
 func TestCachingFileServer_ContentType(t *testing.T) {
-	fs := fstest.MapFS{
-		"style.css":  &fstest.MapFile{Data: []byte("body{}")},
-		"app.js":     &fstest.MapFile{Data: []byte("console.log(1)")},
+	testFS := fstest.MapFS{
+		"style.css": &fstest.MapFile{Data: []byte("body{}")},
+		"app.js":    &fstest.MapFile{Data: []byte("console.log(1)")},
 	}
 
-	etags, _ := ComputeETags(fs)
-	handler := CachingFileServer(fs, etags)
+	etags, _ := ComputeETags(testFS)
+	handler := CachingFileServer(testFS, etags)
 
 	tests := []struct {
-		path        string
-		wantType    string
+		path     string
+		wantType string
 	}{
 		{"/style.css", "text/css"},
 		{"/app.js", "text/javascript"},
 	}
 
-	for _, tt := range tests {
+	for _, testCase := range tests {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, testCase.path, nil))
 
 		if rec.Code != http.StatusOK {
-			t.Errorf("%s: expected 200, got %d", tt.path, rec.Code)
+			t.Errorf("%s: expected 200, got %d", testCase.path, rec.Code)
 			continue
 		}
 
-		ct := rec.Header().Get("Content-Type")
-		if ct == "" {
-			t.Errorf("%s: missing Content-Type header", tt.path)
+		contentType := rec.Header().Get("Content-Type")
+		if contentType == "" {
+			t.Errorf("%s: missing Content-Type header", testCase.path)
 		}
 	}
 }
 
 func TestCachingFileServer_404OnMissing(t *testing.T) {
-	fs := fstest.MapFS{
+	testFS := fstest.MapFS{
 		"style.css": &fstest.MapFile{Data: []byte("body{}")},
 	}
 
-	etags, _ := ComputeETags(fs)
-	handler := CachingFileServer(fs, etags)
+	etags, _ := ComputeETags(testFS)
+	handler := CachingFileServer(testFS, etags)
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent.css", nil)
 	rec := httptest.NewRecorder()

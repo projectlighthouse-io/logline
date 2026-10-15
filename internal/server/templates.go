@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -16,8 +15,8 @@ import (
 )
 
 var templateFuncs = template.FuncMap{
-	"formatTime": func(t time.Time) string {
-		return t.Format("2006-01-02 15:04:05")
+	"formatTime": func(timestamp time.Time) string {
+		return timestamp.Format("2006-01-02 15:04:05")
 	},
 	"levelClass": func(level string) string {
 		switch level {
@@ -33,65 +32,58 @@ var templateFuncs = template.FuncMap{
 			return "bg-gray-100 text-gray-700"
 		}
 	},
-	"add": func(a, b int) int {
-		return a + b
+	"add": func(left, right int) int {
+		return left + right
 	},
-	"queryString": func(f store.LogFilter, cursor int64) string {
-		v := url.Values{}
-		if f.Level != "" {
-			v.Set("level", f.Level)
+	"queryString": func(filter store.LogFilter, cursor int64) string {
+		values := url.Values{}
+		if filter.Level != "" {
+			values.Set("level", filter.Level)
 		}
-		if f.Service != "" {
-			v.Set("service", f.Service)
+		if filter.Service != "" {
+			values.Set("service", filter.Service)
 		}
-		if f.Query != "" {
-			v.Set("q", f.Query)
+		if filter.Query != "" {
+			values.Set("q", filter.Query)
 		}
-		if !f.From.IsZero() {
-			v.Set("from", f.FromDate())
+		if !filter.From.IsZero() {
+			values.Set("from", filter.FromDate())
 		}
-		if !f.To.IsZero() {
-			v.Set("to", f.ToDate())
+		if !filter.To.IsZero() {
+			values.Set("to", filter.ToDate())
 		}
 		if cursor > 0 {
-			v.Set("cursor", strconv.FormatInt(cursor, 10))
+			values.Set("cursor", strconv.FormatInt(cursor, 10))
 		}
-		if encoded := v.Encode(); encoded != "" {
+		if encoded := values.Encode(); encoded != "" {
 			return "?" + encoded
 		}
 		return ""
 	},
 }
 
-func newTemplateCache(dir string) map[string]*template.Template {
+func newTemplateCache(fsys fs.FS) map[string]*template.Template {
 	cache := map[string]*template.Template{}
-
-	// skip if templates directory doesn't exist (e.g. during tests)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return cache
-	}
 
 	pages := []string{"logs.html", "login.html", "dashboard.html"}
 
 	for _, page := range pages {
-		name := filepath.Base(page)
-
-		t, err := template.New("base.html").Funcs(templateFuncs).ParseFiles(
-			filepath.Join(dir, "base.html"),
-			filepath.Join(dir, page),
+		pageTemplate, err := template.New("base.html").Funcs(templateFuncs).ParseFS(fsys,
+			"templates/base.html",
+			"templates/"+page,
 		)
 		if err != nil {
-			log.Fatalf("parsing template %s: %v", name, err)
+			log.Fatalf("parsing template %s: %v", page, err)
 		}
 
-		cache[name] = t
+		cache[page] = pageTemplate
 	}
 
 	return cache
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, page string, data any) {
-	t, ok := s.templates[page]
+	pageTemplate, ok := s.templates[page]
 	if !ok {
 		s.logger.Error("template not found", "page", page)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -99,7 +91,7 @@ func (s *Server) render(w http.ResponseWriter, status int, page string, data any
 	}
 
 	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, "base.html", data); err != nil {
+	if err := pageTemplate.ExecuteTemplate(&buf, "base.html", data); err != nil {
 		s.logger.Error("rendering template", "page", page, "error", err.Error())
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

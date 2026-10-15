@@ -25,6 +25,10 @@ func TestCORS_AllowedOrigin(t *testing.T) {
 	if rec.Header().Get("Access-Control-Allow-Methods") == "" {
 		t.Error("expected Access-Control-Allow-Methods header")
 	}
+
+	if rec.Header().Get("Vary") != "Origin" {
+		t.Errorf("expected Vary: Origin, got %q", rec.Header().Get("Vary"))
+	}
 }
 
 func TestCORS_DisallowedOrigin(t *testing.T) {
@@ -39,6 +43,11 @@ func TestCORS_DisallowedOrigin(t *testing.T) {
 	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Errorf("expected no CORS headers for disallowed origin, got %q",
 			rec.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	// a cache must not reuse this response for an allowed origin
+	if rec.Header().Get("Vary") != "Origin" {
+		t.Errorf("expected Vary: Origin, got %q", rec.Header().Get("Vary"))
 	}
 }
 

@@ -2,31 +2,34 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
+
+	"logline/internal/domain"
 )
 
 type authContextKey string
 
 const ApiKeyContextKey authContextKey = "api_key"
 
-func Middleware(store *ApiKeyStore) func(http.Handler) http.Handler {
+func Middleware(apiKeyStore *ApiKeyStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := extractBearerToken(r)
 			if !ok {
-				http.Error(w, `{"error":"missing or malformed authorization header"}`, http.StatusUnauthorized)
+				writeError(w, http.StatusUnauthorized, "missing or malformed authorization header")
 				return
 			}
 
-			key, err := store.Validate(r.Context(), token)
+			key, err := apiKeyStore.Validate(r.Context(), token)
 			if err != nil {
-				http.Error(w, `{"error":"invalid api key"}`, http.StatusUnauthorized)
+				writeError(w, http.StatusUnauthorized, "invalid api key")
 				return
 			}
 
 			if key.RevokedAt != nil {
-				http.Error(w, `{"error":"api key has been revoked"}`, http.StatusForbidden)
+				writeError(w, http.StatusForbidden, "api key has been revoked")
 				return
 			}
 
@@ -58,4 +61,12 @@ func extractBearerToken(r *http.Request) (string, bool) {
 func KeyFromContext(ctx context.Context) *ApiKey {
 	key, _ := ctx.Value(ApiKeyContextKey).(*ApiKey)
 	return key
+}
+
+// writeError sends a JSON error body with the same shape as every handler's errors.
+// http.Error would force Content-Type: text/plain.
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(domain.ErrorResponse{Error: message})
 }

@@ -17,10 +17,10 @@ func TestValidateLogEntry_MissingFields(t *testing.T) {
 		{"missing timestamp", LogEntry{Level: "info", Message: "ok", Service: "api"}, "timestamp is required"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := ValidateLogEntry(tt.entry); got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := ValidateLogEntry(testCase.entry); got != testCase.want {
+				t.Errorf("got %q, want %q", got, testCase.want)
 			}
 		})
 	}

@@ -62,22 +62,25 @@ func run() error {
 	}
 	logger.Info("migrations applied")
 
-	s := store.New(db)
-	aks := auth.NewApiKeyStore(db)
-	us := auth.NewUserStore(db)
-	ss := auth.NewSessionStore(db)
-	srv := server.New(cfg, logger, s, aks, us, ss)
+	logStore := store.New(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
+	userStore := auth.NewUserStore(db)
+	sessionStore := auth.NewSessionStore(db)
+	srv := server.New(cfg, logger, logStore, apiKeyStore, userStore, sessionStore)
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 
-	rw := worker.NewRetentionWorker(db, cfg.RetentionDays, 1*time.Hour, logger)
-	go rw.Run(workerCtx)
+	retentionWorker := worker.NewRetentionWorker(db, cfg.RetentionDays, 1*time.Hour, logger)
+	go retentionWorker.Run(workerCtx)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	httpServer := &http.Server{
-		Addr:    addr,
-		Handler: srv,
+		Addr:         addr,
+		Handler:      srv,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	// channel to capture ListenAndServe errors
@@ -96,8 +99,8 @@ func run() error {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
-	case sig := <-quit:
-		logger.Info("shutdown signal received", slog.String("signal", sig.String()))
+	case receivedSignal := <-quit:
+		logger.Info("shutdown signal received", slog.String("signal", receivedSignal.String()))
 	case err := <-serverErr:
 		if err != nil && err != http.ErrServerClosed {
 			return fmt.Errorf("http server error: %w", err)

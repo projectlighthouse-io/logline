@@ -48,7 +48,7 @@ func (w *RetentionWorker) deleteExpired(ctx context.Context) {
 			return
 		}
 
-		res, err := w.db.ExecContext(ctx,
+		result, err := w.db.ExecContext(ctx,
 			`DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE created_at < $1 LIMIT $2)`,
 			cutoff, retentionBatchSize,
 		)
@@ -59,7 +59,7 @@ func (w *RetentionWorker) deleteExpired(ctx context.Context) {
 			return
 		}
 
-		affected, err := res.RowsAffected()
+		affected, err := result.RowsAffected()
 		if err != nil {
 			w.logger.Error("retention rows affected check failed",
 				slog.String("error", err.Error()),

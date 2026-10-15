@@ -10,13 +10,15 @@ LDFLAGS := -s -w \
 BINARY := logline
 IMAGE  := logline
 
+DEPLOY_HOST ?= deploy@server
+
 .PHONY: build test lint docker clean deploy
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/logline
 
 test:
-	go test -p 1 ./... -count=1
+	go test -race -p 1 ./... -count=1
 
 lint:
 	golangci-lint run ./...
@@ -34,5 +36,5 @@ clean:
 	rm -f $(BINARY)
 
 deploy: build
-	scp $(BINARY) deploy@server:/opt/logline/$(BINARY)
-	ssh deploy@server 'sudo systemctl restart logline'
+	scp $(BINARY) $(DEPLOY_HOST):/opt/logline/$(BINARY)
+	ssh $(DEPLOY_HOST) 'sudo systemctl restart logline'

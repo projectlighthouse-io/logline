@@ -67,38 +67,38 @@ func TestGenerateKey_Format(t *testing.T) {
 }
 
 func TestHashKey_Deterministic(t *testing.T) {
-	h1 := auth.HashKey("ll_test123")
-	h2 := auth.HashKey("ll_test123")
+	firstHash := auth.HashKey("ll_test123")
+	secondHash := auth.HashKey("ll_test123")
 
-	if h1 != h2 {
+	if firstHash != secondHash {
 		t.Error("same input should produce same hash")
 	}
 
-	if len(h1) != 64 {
-		t.Errorf("expected 64-char hex hash, got %d", len(h1))
+	if len(firstHash) != 64 {
+		t.Errorf("expected 64-char hex hash, got %d", len(firstHash))
 	}
 }
 
 func TestHashKey_DifferentInputs(t *testing.T) {
-	h1 := auth.HashKey("ll_key1")
-	h2 := auth.HashKey("ll_key2")
+	firstHash := auth.HashKey("ll_key1")
+	secondHash := auth.HashKey("ll_key2")
 
-	if h1 == h2 {
+	if firstHash == secondHash {
 		t.Error("different inputs should produce different hashes")
 	}
 }
 
 func TestCreateAndValidate(t *testing.T) {
 	db := setupTestDB(t)
-	store := auth.NewApiKeyStore(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
 	ctx := context.Background()
 
-	rawKey, err := store.Create(ctx, "test-key", "payments")
+	rawKey, err := apiKeyStore.Create(ctx, "test-key", "payments")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	key, err := store.Validate(ctx, rawKey)
+	key, err := apiKeyStore.Validate(ctx, rawKey)
 	if err != nil {
 		t.Fatalf("validate failed: %v", err)
 	}
@@ -118,9 +118,9 @@ func TestCreateAndValidate(t *testing.T) {
 
 func TestValidate_InvalidKey(t *testing.T) {
 	db := setupTestDB(t)
-	store := auth.NewApiKeyStore(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
 
-	_, err := store.Validate(context.Background(), "ll_doesnotexist")
+	_, err := apiKeyStore.Validate(context.Background(), "ll_doesnotexist")
 	if err == nil {
 		t.Error("expected error for invalid key")
 	}
@@ -128,26 +128,26 @@ func TestValidate_InvalidKey(t *testing.T) {
 
 func TestRevoke_ThenValidate(t *testing.T) {
 	db := setupTestDB(t)
-	store := auth.NewApiKeyStore(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
 	ctx := context.Background()
 
-	rawKey, err := store.Create(ctx, "revoke-test", "auth")
+	rawKey, err := apiKeyStore.Create(ctx, "revoke-test", "auth")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// validate before revoke — should work
-	key, err := store.Validate(ctx, rawKey)
+	key, err := apiKeyStore.Validate(ctx, rawKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := store.Revoke(ctx, key.ID); err != nil {
+	if err := apiKeyStore.Revoke(ctx, key.ID); err != nil {
 		t.Fatalf("revoke failed: %v", err)
 	}
 
 	// validate after revoke — should still return the key (with RevokedAt set)
-	key, err = store.Validate(ctx, rawKey)
+	key, err = apiKeyStore.Validate(ctx, rawKey)
 	if err != nil {
 		t.Fatalf("validate after revoke should still return key: %v", err)
 	}
@@ -159,15 +159,15 @@ func TestRevoke_ThenValidate(t *testing.T) {
 
 func TestRevoke_AlreadyRevoked(t *testing.T) {
 	db := setupTestDB(t)
-	store := auth.NewApiKeyStore(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
 	ctx := context.Background()
 
-	rawKey, _ := store.Create(ctx, "double-revoke", "api")
-	key, _ := store.Validate(ctx, rawKey)
+	rawKey, _ := apiKeyStore.Create(ctx, "double-revoke", "api")
+	key, _ := apiKeyStore.Validate(ctx, rawKey)
 
-	store.Revoke(ctx, key.ID)
+	apiKeyStore.Revoke(ctx, key.ID)
 
-	err := store.Revoke(ctx, key.ID)
+	err := apiKeyStore.Revoke(ctx, key.ID)
 	if err == nil {
 		t.Error("expected error revoking already-revoked key")
 	}
@@ -175,9 +175,11 @@ func TestRevoke_AlreadyRevoked(t *testing.T) {
 
 func TestMiddleware_NoHeader(t *testing.T) {
 	db := setupTestDB(t)
-	store := auth.NewApiKeyStore(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
 
-	handler := auth.Middleware(store)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	called := false
+	handler := auth.Middleware(apiKeyStore)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -188,17 +190,25 @@ func TestMiddleware_NoHeader(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rec.Code)
 	}
+
+	if contentType := rec.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", contentType)
+	}
+
+	if called {
+		t.Error("inner handler was called despite missing API key")
+	}
 }
 
 func TestMiddleware_ValidKey(t *testing.T) {
 	db := setupTestDB(t)
-	store := auth.NewApiKeyStore(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
 
-	rawKey, _ := store.Create(context.Background(), "mw-test", "api")
+	rawKey, _ := apiKeyStore.Create(context.Background(), "mw-test", "api")
 
 	var capturedKey *auth.ApiKey
 
-	handler := auth.Middleware(store)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.Middleware(apiKeyStore)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedKey = auth.KeyFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -223,14 +233,14 @@ func TestMiddleware_ValidKey(t *testing.T) {
 
 func TestMiddleware_RevokedKey(t *testing.T) {
 	db := setupTestDB(t)
-	store := auth.NewApiKeyStore(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
 	ctx := context.Background()
 
-	rawKey, _ := store.Create(ctx, "revoked-mw", "api")
-	key, _ := store.Validate(ctx, rawKey)
-	store.Revoke(ctx, key.ID)
+	rawKey, _ := apiKeyStore.Create(ctx, "revoked-mw", "api")
+	key, _ := apiKeyStore.Validate(ctx, rawKey)
+	apiKeyStore.Revoke(ctx, key.ID)
 
-	handler := auth.Middleware(store)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auth.Middleware(apiKeyStore)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

@@ -4,10 +4,10 @@
 // data:     array of numeric values
 // label:    dataset label string
 function initChart(canvasId, labels, data, label) {
-    var ctx = document.getElementById(canvasId);
-    if (!ctx) return null;
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
 
-    return new Chart(ctx, {
+    return new Chart(canvas, {
         type: 'bar',
         data: {
             labels: labels,

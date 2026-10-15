@@ -12,6 +12,7 @@ import (
 
 	"logline/internal/auth"
 	"logline/internal/config"
+	"logline/internal/domain"
 	"logline/internal/middleware"
 	"logline/internal/store"
 	"logline/internal/web"
@@ -35,16 +36,16 @@ type Server struct {
 	shuttingDown     atomic.Bool
 }
 
-func New(cfg config.Config, logger *slog.Logger, s *store.Store, aks *auth.ApiKeyStore, us *auth.UserStore, ss *auth.SessionStore) *Server {
+func New(cfg config.Config, logger *slog.Logger, logStore *store.Store, apiKeyStore *auth.ApiKeyStore, userStore *auth.UserStore, sessionStore *auth.SessionStore) *Server {
 	srv := &Server{
 		cfg:              cfg,
 		logger:           logger,
-		store:            s,
-		apiKeyStore:      aks,
-		userStore:        us,
-		sessionStore:     ss,
+		store:            logStore,
+		apiKeyStore:      apiKeyStore,
+		userStore:        userStore,
+		sessionStore:     sessionStore,
 		rateLimiterStore: middleware.NewRateLimiterStore(cfg.RateLimit, cfg.RateLimitBurst, 5*time.Minute),
-		templates:        newTemplateCache("templates"),
+		templates:        newTemplateCache(web.TemplateFS),
 		mux:              http.NewServeMux(),
 	}
 
@@ -77,11 +78,11 @@ func (s *Server) registerRoutes() {
 	if s.cfg.Env == "development" {
 		staticFS = os.DirFS("internal/web/static")
 	} else {
-		sub, err := fs.Sub(web.StaticFS, "static")
+		embeddedStatic, err := fs.Sub(web.StaticFS, "static")
 		if err != nil {
 			s.logger.Error("failed to create static sub-fs", slog.String("error", err.Error()))
 		}
-		staticFS = sub
+		staticFS = embeddedStatic
 	}
 
 	if staticFS != nil {
@@ -119,9 +120,7 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("session_token")
 		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{
-				"error": "authentication required",
-			})
+			writeJSON(w, http.StatusUnauthorized, domain.ErrorResponse{Error: "authentication required"})
 			return
 		}
 
@@ -138,9 +137,7 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 				MaxAge:   -1,
 			})
 
-			writeJSON(w, http.StatusUnauthorized, map[string]string{
-				"error": "authentication required",
-			})
+			writeJSON(w, http.StatusUnauthorized, domain.ErrorResponse{Error: "authentication required"})
 			return
 		}
 

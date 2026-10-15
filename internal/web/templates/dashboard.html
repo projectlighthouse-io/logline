@@ -51,38 +51,19 @@
     const errorsData = {{.ErrorsJSON}};
     const volumeData = {{.VolumeJSON}};
 
-    new Chart(document.getElementById('errorsChart'), {
-        type: 'bar',
-        data: {
-            labels: errorsData.map(d => {
-                const h = new Date(d.time).getHours();
-                return h + ':00';
-            }),
-            datasets: [{
-                label: 'Errors',
-                data: errorsData.map(d => d.count),
-                backgroundColor: 'rgba(239, 68, 68, 0.7)',
-                borderRadius: 3,
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { grid: { display: false } },
-                y: { beginAtZero: true, grid: { color: '#f3f4f6' } },
-            },
-        }
-    });
+    initChart('errorsChart',
+        errorsData.map(bucket => new Date(bucket.time).getHours() + ':00'),
+        errorsData.map(bucket => bucket.count),
+        'Errors');
 
     const serviceColors = ['#ef4444', '#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'];
 
     new Chart(document.getElementById('servicesChart'), {
         type: 'doughnut',
         data: {
-            labels: volumeData.map(d => d.service),
+            labels: volumeData.map(entry => entry.service),
             datasets: [{
-                data: volumeData.map(d => d.count),
+                data: volumeData.map(entry => entry.count),
                 backgroundColor: serviceColors.slice(0, volumeData.length),
             }]
         },
@@ -98,12 +79,12 @@
     (function() {
         const rows = document.querySelectorAll('#errorsTableBody tr');
         if (rows.length === 0) return;
-        const counts = Array.from(rows).map(r => parseInt(r.querySelector('[data-count]').dataset.count, 10));
+        const counts = Array.from(rows).map(row => parseInt(row.querySelector('[data-count]').dataset.count, 10));
         const max = Math.max(...counts);
         if (max === 0) return;
-        rows.forEach((row, i) => {
+        rows.forEach((row, index) => {
             const bar = row.querySelector('.trend-bar');
-            bar.style.width = Math.round((counts[i] / max) * 100) + '%';
+            bar.style.width = Math.round((counts[index] / max) * 100) + '%';
         });
     })();
 </script>

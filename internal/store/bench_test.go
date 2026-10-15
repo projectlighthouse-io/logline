@@ -51,8 +51,8 @@ func setupBenchDB(b *testing.B) *sql.DB {
 	return db
 }
 
-func makeEntries(n int) []domain.LogEntry {
-	entries := make([]domain.LogEntry, n)
+func makeEntries(count int) []domain.LogEntry {
+	entries := make([]domain.LogEntry, count)
 	for i := range entries {
 		entries[i] = domain.LogEntry{
 			Level:     "info",
@@ -67,13 +67,13 @@ func makeEntries(n int) []domain.LogEntry {
 
 func BenchmarkInsertSingle(b *testing.B) {
 	db := setupBenchDB(b)
-	s := store.New(db)
+	logStore := store.New(db)
 	entries := makeEntries(b.N)
 	ctx := context.Background()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := s.InsertLog(ctx, entries[i]); err != nil {
+		if err := logStore.InsertLog(ctx, entries[i]); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -81,13 +81,13 @@ func BenchmarkInsertSingle(b *testing.B) {
 
 func BenchmarkInsertBatch100(b *testing.B) {
 	db := setupBenchDB(b)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		entries := makeEntries(100)
-		if err := s.InsertBatch(ctx, entries); err != nil {
+		if err := logStore.InsertBatch(ctx, entries); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -95,13 +95,13 @@ func BenchmarkInsertBatch100(b *testing.B) {
 
 func BenchmarkCopyFrom100(b *testing.B) {
 	db := setupBenchDB(b)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		entries := makeEntries(100)
-		if _, err := s.CopyFrom(ctx, entries); err != nil {
+		if _, err := logStore.CopyFrom(ctx, entries); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -111,13 +111,13 @@ func BenchmarkInsertBatch(b *testing.B) {
 	for _, size := range []int{10, 50, 100, 500, 1000} {
 		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
 			db := setupBenchDB(b)
-			s := store.New(db)
+			logStore := store.New(db)
 			ctx := context.Background()
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				entries := makeEntries(size)
-				if err := s.InsertBatch(ctx, entries); err != nil {
+				if err := logStore.InsertBatch(ctx, entries); err != nil {
 					b.Fatal(err)
 				}
 			}

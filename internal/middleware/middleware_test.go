@@ -45,11 +45,11 @@ func TestRequestID_UniquePerRequest(t *testing.T) {
 	handler.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/", nil))
 	handler.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/", nil))
 
-	id1 := rec1.Header().Get("X-Request-ID")
-	id2 := rec2.Header().Get("X-Request-ID")
+	firstID := rec1.Header().Get("X-Request-ID")
+	secondID := rec2.Header().Get("X-Request-ID")
 
-	if id1 == id2 {
-		t.Errorf("expected unique IDs, both were %q", id1)
+	if firstID == secondID {
+		t.Errorf("expected unique IDs, both were %q", firstID)
 	}
 }
 
@@ -146,19 +146,19 @@ func TestRecovery_PassesThroughNormally(t *testing.T) {
 func TestChain_ExecutesInOrder(t *testing.T) {
 	var order []string
 
-	m1 := func(next http.Handler) http.Handler {
+	outer := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			order = append(order, "m1-before")
+			order = append(order, "outer-before")
 			next.ServeHTTP(w, r)
-			order = append(order, "m1-after")
+			order = append(order, "outer-after")
 		})
 	}
 
-	m2 := func(next http.Handler) http.Handler {
+	inner := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			order = append(order, "m2-before")
+			order = append(order, "inner-before")
 			next.ServeHTTP(w, r)
-			order = append(order, "m2-after")
+			order = append(order, "inner-after")
 		})
 	}
 
@@ -166,7 +166,7 @@ func TestChain_ExecutesInOrder(t *testing.T) {
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			order = append(order, "handler")
 		}),
-		m1, m2,
+		outer, inner,
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -174,14 +174,14 @@ func TestChain_ExecutesInOrder(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	expected := []string{"m1-before", "m2-before", "handler", "m2-after", "m1-after"}
+	expected := []string{"outer-before", "inner-before", "handler", "inner-after", "outer-after"}
 	if len(order) != len(expected) {
 		t.Fatalf("expected %d calls, got %d: %v", len(expected), len(order), order)
 	}
 
-	for i, v := range expected {
-		if order[i] != v {
-			t.Errorf("step %d: expected %q, got %q", i, v, order[i])
+	for i, step := range expected {
+		if order[i] != step {
+			t.Errorf("step %d: expected %q, got %q", i, step, order[i])
 		}
 	}
 }

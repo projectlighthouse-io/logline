@@ -11,7 +11,7 @@ import (
 
 func TestErrorsPerHour(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -26,13 +26,13 @@ func TestErrorsPerHour(t *testing.T) {
 		{Level: "info", Message: "ok", Service: "api", Timestamp: now},
 	}
 
-	for _, e := range entries {
-		if err := s.InsertLog(ctx, e); err != nil {
+	for _, entry := range entries {
+		if err := logStore.InsertLog(ctx, entry); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	buckets, err := s.ErrorsPerHour(ctx)
+	buckets, err := logStore.ErrorsPerHour(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,8 +43,8 @@ func TestErrorsPerHour(t *testing.T) {
 
 	// sum all counts -- should be 4 (3 errors + 1 fatal, info excluded)
 	total := 0
-	for _, b := range buckets {
-		total += b.Count
+	for _, bucket := range buckets {
+		total += bucket.Count
 	}
 
 	if total != 4 {
@@ -54,7 +54,7 @@ func TestErrorsPerHour(t *testing.T) {
 
 func TestVolumeByService(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -68,13 +68,13 @@ func TestVolumeByService(t *testing.T) {
 		{Level: "info", Message: "f", Service: "worker", Timestamp: now},
 	}
 
-	for _, e := range entries {
-		if err := s.InsertLog(ctx, e); err != nil {
+	for _, entry := range entries {
+		if err := logStore.InsertLog(ctx, entry); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	results, err := s.VolumeByService(ctx)
+	results, err := logStore.VolumeByService(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestVolumeByService(t *testing.T) {
 
 func TestTopErrors(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -114,13 +114,13 @@ func TestTopErrors(t *testing.T) {
 		{Level: "info", Message: "all good", Service: "api", Timestamp: now},
 	}
 
-	for _, e := range entries {
-		if err := s.InsertLog(ctx, e); err != nil {
+	for _, entry := range entries {
+		if err := logStore.InsertLog(ctx, entry); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	results, err := s.TopErrors(ctx)
+	results, err := logStore.TopErrors(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +159,8 @@ func TestFillHourGaps(t *testing.T) {
 
 	// verify the two non-zero entries are present
 	nonZero := 0
-	for _, b := range filled {
-		if b.Count > 0 {
+	for _, bucket := range filled {
+		if bucket.Count > 0 {
 			nonZero++
 		}
 	}

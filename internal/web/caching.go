@@ -19,7 +19,7 @@ func CachingFileServer(fsys fs.FS, etags map[string]string) http.Handler {
 		etag, ok := etags[path]
 		if ok {
 			w.Header().Set("ETag", etag)
-			w.Header().Set("Cache-Control", "public, max-age=86400")
+			w.Header().Set("Cache-Control", "no-cache")
 
 			if match := r.Header.Get("If-None-Match"); match == etag {
 				w.WriteHeader(http.StatusNotModified)

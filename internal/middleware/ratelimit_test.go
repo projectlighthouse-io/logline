@@ -26,8 +26,8 @@ func requestWithKey(prefix string) *http.Request {
 }
 
 func TestRateLimit_AllowsWithinBurst(t *testing.T) {
-	store := middleware.NewRateLimiterStore(100, 5, 10*time.Minute)
-	handler := middleware.RateLimit(store)(makeHandler())
+	limiterStore := middleware.NewRateLimiterStore(100, 5, 10*time.Minute)
+	handler := middleware.RateLimit(limiterStore)(makeHandler())
 
 	for i := 0; i < 5; i++ {
 		rec := httptest.NewRecorder()
@@ -40,8 +40,8 @@ func TestRateLimit_AllowsWithinBurst(t *testing.T) {
 }
 
 func TestRateLimit_RejectsOverBurst(t *testing.T) {
-	store := middleware.NewRateLimiterStore(1, 3, 10*time.Minute)
-	handler := middleware.RateLimit(store)(makeHandler())
+	limiterStore := middleware.NewRateLimiterStore(1, 3, 10*time.Minute)
+	handler := middleware.RateLimit(limiterStore)(makeHandler())
 
 	got429 := false
 	for i := 0; i < 10; i++ {
@@ -50,6 +50,9 @@ func TestRateLimit_RejectsOverBurst(t *testing.T) {
 
 		if rec.Code == http.StatusTooManyRequests {
 			got429 = true
+			if contentType := rec.Header().Get("Content-Type"); contentType != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", contentType)
+			}
 		}
 	}
 
@@ -59,8 +62,8 @@ func TestRateLimit_RejectsOverBurst(t *testing.T) {
 }
 
 func TestRateLimit_RetryAfterHeader(t *testing.T) {
-	store := middleware.NewRateLimiterStore(1, 1, 10*time.Minute)
-	handler := middleware.RateLimit(store)(makeHandler())
+	limiterStore := middleware.NewRateLimiterStore(1, 1, 10*time.Minute)
+	handler := middleware.RateLimit(limiterStore)(makeHandler())
 
 	// exhaust the single token
 	rec := httptest.NewRecorder()
@@ -81,8 +84,8 @@ func TestRateLimit_RetryAfterHeader(t *testing.T) {
 }
 
 func TestRateLimit_PerKeyIsolation(t *testing.T) {
-	store := middleware.NewRateLimiterStore(1, 2, 10*time.Minute)
-	handler := middleware.RateLimit(store)(makeHandler())
+	limiterStore := middleware.NewRateLimiterStore(1, 2, 10*time.Minute)
+	handler := middleware.RateLimit(limiterStore)(makeHandler())
 
 	// exhaust key A
 	for i := 0; i < 5; i++ {
@@ -100,8 +103,8 @@ func TestRateLimit_PerKeyIsolation(t *testing.T) {
 }
 
 func TestRateLimit_NoApiKey_Returns401(t *testing.T) {
-	store := middleware.NewRateLimiterStore(100, 200, 10*time.Minute)
-	handler := middleware.RateLimit(store)(makeHandler())
+	limiterStore := middleware.NewRateLimiterStore(100, 200, 10*time.Minute)
+	handler := middleware.RateLimit(limiterStore)(makeHandler())
 
 	req := httptest.NewRequest(http.MethodPost, "/ingest", nil)
 	rec := httptest.NewRecorder()

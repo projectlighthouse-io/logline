@@ -30,13 +30,13 @@ type MessageCount struct {
 }
 
 type LogRow struct {
-	ID        int64
-	Level     string
-	Message   string
-	Service   string
-	Timestamp time.Time
-	Data      map[string]any
-	CreatedAt time.Time
+	ID        int64          `json:"id"`
+	Level     string         `json:"level"`
+	Message   string         `json:"message"`
+	Service   string         `json:"service"`
+	Timestamp time.Time      `json:"timestamp"`
+	Data      map[string]any `json:"data"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 func (s *Store) InsertLog(ctx context.Context, entry domain.LogEntry) error {
@@ -57,14 +57,14 @@ func (s *Store) InsertBatch(ctx context.Context, entries []domain.LogEntry) erro
 		return nil
 	}
 
-	var b strings.Builder
-	b.WriteString("INSERT INTO logs (level, message, service, timestamp, data) VALUES ")
+	var sqlBuilder strings.Builder
+	sqlBuilder.WriteString("INSERT INTO logs (level, message, service, timestamp, data) VALUES ")
 
 	args := make([]any, 0, len(entries)*5)
 
 	for i, entry := range entries {
 		if i > 0 {
-			b.WriteString(", ")
+			sqlBuilder.WriteString(", ")
 		}
 
 		data, err := json.Marshal(entry.Data)
@@ -73,24 +73,25 @@ func (s *Store) InsertBatch(ctx context.Context, entries []domain.LogEntry) erro
 		}
 
 		offset := i * 5
-		fmt.Fprintf(&b, "($%d,$%d,$%d,$%d,$%d)",
+		fmt.Fprintf(&sqlBuilder, "($%d,$%d,$%d,$%d,$%d)",
 			offset+1, offset+2, offset+3, offset+4, offset+5)
 
 		args = append(args, entry.Level, entry.Message, entry.Service, entry.Timestamp, data)
 	}
 
-	_, err := s.db.ExecContext(ctx, b.String(), args...)
+	_, err := s.db.ExecContext(ctx, sqlBuilder.String(), args...)
 	return err
 }
 
 type LogFilter struct {
-	Level   string
-	Service string
-	From    time.Time
-	To      time.Time
-	Query   string
-	Cursor  int64
-	Limit   int
+	Level      string
+	Service    string
+	From       time.Time
+	To         time.Time
+	Query      string
+	DataFilter map[string]any
+	Cursor     int64
+	Limit      int
 }
 
 func (f LogFilter) FromDate() string {
@@ -116,63 +117,73 @@ func (s *Store) ListServices(ctx context.Context) ([]string, error) {
 
 	var services []string
 	for rows.Next() {
-		var svc string
-		if err := rows.Scan(&svc); err != nil {
+		var service string
+		if err := rows.Scan(&service); err != nil {
 			return nil, fmt.Errorf("scan service: %w", err)
 		}
-		services = append(services, svc)
+		services = append(services, service)
 	}
 
 	return services, rows.Err()
 }
 
-func (s *Store) QueryLogs(ctx context.Context, f LogFilter) ([]LogRow, error) {
-	var b strings.Builder
-	b.WriteString("SELECT id, level, message, service, timestamp, data, created_at FROM logs WHERE 1=1")
+func (s *Store) QueryLogs(ctx context.Context, filter LogFilter) ([]LogRow, error) {
+	var sqlBuilder strings.Builder
+	sqlBuilder.WriteString("SELECT id, level, message, service, timestamp, data, created_at FROM logs WHERE 1=1")
 	args := []any{}
 	argPos := 1
 
-	if f.Level != "" {
-		fmt.Fprintf(&b, " AND level = $%d", argPos)
-		args = append(args, f.Level)
+	if filter.Level != "" {
+		fmt.Fprintf(&sqlBuilder, " AND level = $%d", argPos)
+		args = append(args, filter.Level)
 		argPos++
 	}
 
-	if f.Service != "" {
-		fmt.Fprintf(&b, " AND service = $%d", argPos)
-		args = append(args, f.Service)
+	if filter.Service != "" {
+		fmt.Fprintf(&sqlBuilder, " AND service = $%d", argPos)
+		args = append(args, filter.Service)
 		argPos++
 	}
 
-	if !f.From.IsZero() {
-		fmt.Fprintf(&b, " AND timestamp >= $%d", argPos)
-		args = append(args, f.From)
+	if !filter.From.IsZero() {
+		fmt.Fprintf(&sqlBuilder, " AND timestamp >= $%d", argPos)
+		args = append(args, filter.From)
 		argPos++
 	}
 
-	if !f.To.IsZero() {
-		fmt.Fprintf(&b, " AND timestamp <= $%d", argPos)
-		args = append(args, f.To)
+	if !filter.To.IsZero() {
+		fmt.Fprintf(&sqlBuilder, " AND timestamp <= $%d", argPos)
+		args = append(args, filter.To)
 		argPos++
 	}
 
-	if f.Query != "" {
-		fmt.Fprintf(&b, " AND to_tsvector('english', message) @@ websearch_to_tsquery('english', $%d)", argPos)
-		args = append(args, f.Query)
+	if filter.Query != "" {
+		fmt.Fprintf(&sqlBuilder, " AND to_tsvector('english', message) @@ websearch_to_tsquery('english', $%d)", argPos)
+		args = append(args, filter.Query)
 		argPos++
 	}
 
-	if f.Cursor > 0 {
-		fmt.Fprintf(&b, " AND id < $%d", argPos)
-		args = append(args, f.Cursor)
+	if filter.DataFilter != nil {
+		dataJSON, err := json.Marshal(filter.DataFilter)
+		if err != nil {
+			return nil, fmt.Errorf("marshal data filter: %w", err)
+		}
+		fmt.Fprintf(&sqlBuilder, " AND data @> $%d::jsonb", argPos)
+		args = append(args, string(dataJSON))
 		argPos++
 	}
 
-	b.WriteString(" ORDER BY id DESC")
-	fmt.Fprintf(&b, " LIMIT $%d", argPos)
-	args = append(args, f.Limit)
+	if filter.Cursor > 0 {
+		fmt.Fprintf(&sqlBuilder, " AND id < $%d", argPos)
+		args = append(args, filter.Cursor)
+		argPos++
+	}
 
-	rows, err := s.db.QueryContext(ctx, b.String(), args...)
+	sqlBuilder.WriteString(" ORDER BY id DESC")
+	fmt.Fprintf(&sqlBuilder, " LIMIT $%d", argPos)
+	args = append(args, filter.Limit)
+
+	rows, err := s.db.QueryContext(ctx, sqlBuilder.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("query logs: %w", err)
 	}
@@ -180,20 +191,20 @@ func (s *Store) QueryLogs(ctx context.Context, f LogFilter) ([]LogRow, error) {
 
 	var results []LogRow
 	for rows.Next() {
-		var r LogRow
+		var row LogRow
 		var data []byte
 
-		if err := rows.Scan(&r.ID, &r.Level, &r.Message, &r.Service, &r.Timestamp, &data, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.Level, &row.Message, &row.Service, &row.Timestamp, &data, &row.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan log row: %w", err)
 		}
 
 		if data != nil {
-			if err := json.Unmarshal(data, &r.Data); err != nil {
+			if err := json.Unmarshal(data, &row.Data); err != nil {
 				return nil, fmt.Errorf("unmarshal data column: %w", err)
 			}
 		}
 
-		results = append(results, r)
+		results = append(results, row)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -219,11 +230,11 @@ func (s *Store) ErrorsPerHour(ctx context.Context) ([]TimeBucket, error) {
 
 	var buckets []TimeBucket
 	for rows.Next() {
-		var b TimeBucket
-		if err := rows.Scan(&b.Time, &b.Count); err != nil {
+		var bucket TimeBucket
+		if err := rows.Scan(&bucket.Time, &bucket.Count); err != nil {
 			return nil, fmt.Errorf("scan time bucket: %w", err)
 		}
-		buckets = append(buckets, b)
+		buckets = append(buckets, bucket)
 	}
 
 	return buckets, rows.Err()
@@ -245,11 +256,11 @@ func (s *Store) VolumeByService(ctx context.Context) ([]ServiceCount, error) {
 
 	var results []ServiceCount
 	for rows.Next() {
-		var sc ServiceCount
-		if err := rows.Scan(&sc.Service, &sc.Count); err != nil {
+		var serviceCount ServiceCount
+		if err := rows.Scan(&serviceCount.Service, &serviceCount.Count); err != nil {
 			return nil, fmt.Errorf("scan service count: %w", err)
 		}
-		results = append(results, sc)
+		results = append(results, serviceCount)
 	}
 
 	return results, rows.Err()
@@ -272,11 +283,11 @@ func (s *Store) TopErrors(ctx context.Context) ([]MessageCount, error) {
 
 	var results []MessageCount
 	for rows.Next() {
-		var mc MessageCount
-		if err := rows.Scan(&mc.Message, &mc.Count); err != nil {
+		var messageCount MessageCount
+		if err := rows.Scan(&messageCount.Message, &messageCount.Count); err != nil {
 			return nil, fmt.Errorf("scan message count: %w", err)
 		}
-		results = append(results, mc)
+		results = append(results, messageCount)
 	}
 
 	return results, rows.Err()
@@ -289,16 +300,16 @@ func FillHourGaps(buckets []TimeBucket) []TimeBucket {
 	start := now.Add(-23 * time.Hour)
 
 	lookup := make(map[int64]int, len(buckets))
-	for _, b := range buckets {
-		key := b.Time.UTC().Truncate(time.Hour).Unix()
-		lookup[key] = b.Count
+	for _, bucket := range buckets {
+		key := bucket.Time.UTC().Truncate(time.Hour).Unix()
+		lookup[key] = bucket.Count
 	}
 
 	filled := make([]TimeBucket, 24)
 	for i := 0; i < 24; i++ {
-		t := start.Add(time.Duration(i) * time.Hour)
-		count := lookup[t.Unix()]
-		filled[i] = TimeBucket{Time: t, Count: count}
+		hour := start.Add(time.Duration(i) * time.Hour)
+		count := lookup[hour.Unix()]
+		filled[i] = TimeBucket{Time: hour, Count: count}
 	}
 
 	return filled

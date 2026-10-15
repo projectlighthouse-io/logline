@@ -11,8 +11,8 @@ import (
 
 type BufferedStore struct {
 	store     *Store
-	mu        sync.Mutex
-	buf       []domain.LogEntry
+	mutex     sync.Mutex
+	buffer    []domain.LogEntry
 	batchSize int
 	interval  time.Duration
 	stop      chan struct{}
@@ -20,23 +20,23 @@ type BufferedStore struct {
 }
 
 func NewBufferedStore(store *Store, batchSize int, interval time.Duration) *BufferedStore {
-	bs := &BufferedStore{
+	bufferedStore := &BufferedStore{
 		store:     store,
-		buf:       make([]domain.LogEntry, 0, batchSize),
+		buffer:    make([]domain.LogEntry, 0, batchSize),
 		batchSize: batchSize,
 		interval:  interval,
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
 	}
-	go bs.flushLoop()
-	return bs
+	go bufferedStore.flushLoop()
+	return bufferedStore
 }
 
 func (bs *BufferedStore) Add(entry domain.LogEntry) {
-	bs.mu.Lock()
-	bs.buf = append(bs.buf, entry)
-	full := len(bs.buf) >= bs.batchSize
-	bs.mu.Unlock()
+	bs.mutex.Lock()
+	bs.buffer = append(bs.buffer, entry)
+	full := len(bs.buffer) >= bs.batchSize
+	bs.mutex.Unlock()
 
 	if full {
 		bs.flush()
@@ -44,15 +44,15 @@ func (bs *BufferedStore) Add(entry domain.LogEntry) {
 }
 
 func (bs *BufferedStore) flush() {
-	bs.mu.Lock()
-	if len(bs.buf) == 0 {
-		bs.mu.Unlock()
+	bs.mutex.Lock()
+	if len(bs.buffer) == 0 {
+		bs.mutex.Unlock()
 		return
 	}
 
-	entries := bs.buf
-	bs.buf = make([]domain.LogEntry, 0, bs.batchSize)
-	bs.mu.Unlock()
+	entries := bs.buffer
+	bs.buffer = make([]domain.LogEntry, 0, bs.batchSize)
+	bs.mutex.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

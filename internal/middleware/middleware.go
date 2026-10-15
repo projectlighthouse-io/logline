@@ -33,9 +33,9 @@ func GetRequestID(ctx context.Context) string {
 }
 
 func generateID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	randomBytes := make([]byte, 16)
+	_, _ = rand.Read(randomBytes)
+	return hex.EncodeToString(randomBytes)
 }
 
 type wrappedWriter struct {
@@ -52,12 +52,12 @@ func (w *wrappedWriter) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
-func (w *wrappedWriter) Write(b []byte) (int, error) {
+func (w *wrappedWriter) Write(data []byte) (int, error) {
 	if !w.written {
 		w.statusCode = http.StatusOK
 		w.written = true
 	}
-	return w.ResponseWriter.Write(b)
+	return w.ResponseWriter.Write(data)
 }
 
 func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
@@ -89,11 +89,11 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 			defer func() {
 				if err := recover(); err != nil {
 					buf := make([]byte, 4096)
-					n := runtime.Stack(buf, false)
+					stackLength := runtime.Stack(buf, false)
 
 					logger.Error("panic recovered",
 						slog.Any("error", err),
-						slog.String("stack", string(buf[:n])),
+						slog.String("stack", string(buf[:stackLength])),
 						slog.String("method", r.Method),
 						slog.String("path", r.URL.Path),
 						slog.String("request_id", GetRequestID(r.Context())),
@@ -108,9 +108,9 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-func Chain(h http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
+func Chain(handler http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
 	for i := len(middlewares) - 1; i >= 0; i-- {
-		h = middlewares[i](h)
+		handler = middlewares[i](handler)
 	}
-	return h
+	return handler
 }

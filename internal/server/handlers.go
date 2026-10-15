@@ -324,14 +324,43 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// todo: implement log listing with query params
+type LogResponse struct {
+	Logs       []store.LogRow `json:"logs"`
+	NextCursor *int64         `json:"next_cursor,omitempty"`
+}
+
 func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"message": "ok",
-	})
+	filter, err := parseLogFilter(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, domain.ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	logs, err := s.store.QueryLogs(r.Context(), filter)
+	if err != nil {
+		s.logger.Error("failed to query logs", slog.String("error", err.Error()))
+		writeJSON(w, http.StatusInternalServerError, domain.ErrorResponse{
+			Error: "internal error",
+		})
+		return
+	}
+
+	if logs == nil {
+		logs = []store.LogRow{} // encode an empty page as [], not null
+	}
+
+	resp := LogResponse{Logs: logs}
+
+	if len(logs) == filter.Limit {
+		lastID := logs[len(logs)-1].ID
+		resp.NextCursor = &lastID
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type logViewerData struct {
+	User       *auth.User
 	Logs       []store.LogRow
 	Filter     store.LogFilter
 	Services   []string
@@ -412,43 +441,13 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboardLogs(w http.ResponseWriter, r *http.Request) {
-	f := store.LogFilter{
-		Limit: 50,
+	filter, err := parseLogFilter(r)
+	if err != nil {
+		http.Error(w, "invalid filter parameters", http.StatusBadRequest)
+		return
 	}
 
-	q := r.URL.Query()
-
-	if v := q.Get("level"); v != "" {
-		f.Level = v
-	}
-	if v := q.Get("service"); v != "" {
-		f.Service = v
-	}
-	if v := q.Get("q"); v != "" {
-		f.Query = v
-	}
-	if v := q.Get("from"); v != "" {
-		if t, err := parseTime(v); err == nil {
-			f.From = t
-		}
-	}
-	if v := q.Get("to"); v != "" {
-		if t, err := parseTime(v); err == nil {
-			f.To = t
-		}
-	}
-	if v := q.Get("cursor"); v != "" {
-		if c, err := strconv.ParseInt(v, 10, 64); err == nil {
-			f.Cursor = c
-		}
-	}
-	if v := q.Get("limit"); v != "" {
-		if l, err := strconv.Atoi(v); err == nil && l > 0 && l <= 200 {
-			f.Limit = l
-		}
-	}
-
-	logs, err := s.store.QueryLogs(r.Context(), f)
+	logs, err := s.store.QueryLogs(r.Context(), filter)
 	if err != nil {
 		s.logger.Error("failed to query logs", slog.String("error", err.Error()))
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -463,14 +462,15 @@ func (s *Server) handleDashboardLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var nextCursor int64
-	hasMore := len(logs) == f.Limit
+	hasMore := len(logs) == filter.Limit
 	if hasMore {
 		nextCursor = logs[len(logs)-1].ID
 	}
 
 	s.render(w, http.StatusOK, "logs.html", logViewerData{
+		User:       userFromContext(r.Context()),
 		Logs:       logs,
-		Filter:     f,
+		Filter:     filter,
 		Services:   services,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
@@ -478,6 +478,7 @@ func (s *Server) handleDashboardLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 type dashboardOverviewData struct {
+	User            *auth.User
 	ErrorsPerHour   []store.TimeBucket
 	VolumeByService []store.ServiceCount
 	TopErrors       []store.MessageCount
@@ -488,7 +489,7 @@ type dashboardOverviewData struct {
 func (s *Server) handleDashboardOverview(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	errors, err := s.store.ErrorsPerHour(ctx)
+	errorsPerHour, err := s.store.ErrorsPerHour(ctx)
 	if err != nil {
 		s.logger.Error("failed to query errors per hour", slog.String("error", err.Error()))
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -509,7 +510,7 @@ func (s *Server) handleDashboardOverview(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	filled := store.FillHourGaps(errors)
+	filled := store.FillHourGaps(errorsPerHour)
 
 	errorsJSON, err := json.Marshal(filled)
 	if err != nil {
@@ -531,6 +532,7 @@ func (s *Server) handleDashboardOverview(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.render(w, http.StatusOK, "dashboard.html", dashboardOverviewData{
+		User:            userFromContext(r.Context()),
 		ErrorsPerHour:   filled,
 		VolumeByService: volume,
 		TopErrors:       topErrors,
@@ -539,18 +541,80 @@ func (s *Server) handleDashboardOverview(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// parseTime tries RFC3339 first, then date-only format
-func parseTime(v string) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, v); err == nil {
-		return t, nil
+// parseLogFilter reads the query parameters shared by the JSON API and the dashboard
+func parseLogFilter(r *http.Request) (store.LogFilter, error) {
+	query := r.URL.Query()
+
+	filter := store.LogFilter{
+		Level:   query.Get("level"),
+		Service: query.Get("service"),
+		Query:   query.Get("q"),
+		Limit:   50,
 	}
-	return time.Parse("2006-01-02", v)
+
+	if value := query.Get("from"); value != "" {
+		parsed, err := parseTime(value)
+		if err != nil {
+			return store.LogFilter{}, fmt.Errorf("invalid 'from' timestamp: %w", err)
+		}
+		filter.From = parsed
+	}
+
+	if value := query.Get("to"); value != "" {
+		parsed, err := parseTime(value)
+		if err != nil {
+			return store.LogFilter{}, fmt.Errorf("invalid 'to' timestamp: %w", err)
+		}
+		if len(value) == len("2006-01-02") {
+			// a bare date means "through the end of that day", not midnight at its start
+			parsed = parsed.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		}
+		filter.To = parsed
+	}
+
+	if value := query.Get("cursor"); value != "" {
+		cursor, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return store.LogFilter{}, fmt.Errorf("invalid cursor: %w", err)
+		}
+		filter.Cursor = cursor
+	}
+
+	if value := query.Get("limit"); value != "" {
+		limit, err := strconv.Atoi(value)
+		if err != nil {
+			return store.LogFilter{}, fmt.Errorf("invalid limit: %w", err)
+		}
+		filter.Limit = limit
+	}
+
+	if value := query.Get("data"); value != "" {
+		var dataFilter map[string]any
+		if err := json.Unmarshal([]byte(value), &dataFilter); err != nil {
+			return store.LogFilter{}, fmt.Errorf("invalid 'data' filter: %w", err)
+		}
+		filter.DataFilter = dataFilter
+	}
+
+	if filter.Limit < 1 || filter.Limit > 200 {
+		filter.Limit = 50
+	}
+
+	return filter, nil
+}
+
+// parseTime tries RFC3339 first, then date-only format
+func parseTime(value string) (time.Time, error) {
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed, nil
+	}
+	return time.Parse("2006-01-02", value)
 }
 
 const maxBodySize = 1_048_576 // 1 MB
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	json.NewEncoder(w).Encode(payload)
 }

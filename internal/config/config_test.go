@@ -33,12 +33,12 @@ func TestValidatePort(t *testing.T) {
 		{"port too high", 65536, true},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := Config{Port: tt.port, Env: "development", LogLevel: "info", DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := Config{Port: testCase.port, Env: "development", LogLevel: "info", DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
 			err := cfg.validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("port=%d: wantErr=%v, got %v", tt.port, tt.wantErr, err)
+			if (err != nil) != testCase.wantErr {
+				t.Errorf("port=%d: wantErr=%v, got %v", testCase.port, testCase.wantErr, err)
 			}
 		})
 	}
@@ -56,12 +56,12 @@ func TestValidateEnv(t *testing.T) {
 		{"empty", "", true},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := Config{Port: 4000, Env: tt.env, LogLevel: "info", DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := Config{Port: 4000, Env: testCase.env, LogLevel: "info", DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
 			err := cfg.validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("env=%q: wantErr=%v, got %v", tt.env, tt.wantErr, err)
+			if (err != nil) != testCase.wantErr {
+				t.Errorf("env=%q: wantErr=%v, got %v", testCase.env, testCase.wantErr, err)
 			}
 		})
 	}
@@ -81,12 +81,12 @@ func TestValidateLogLevel(t *testing.T) {
 		{"empty", "", true},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := Config{Port: 4000, Env: "development", LogLevel: tt.level, DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := Config{Port: 4000, Env: "development", LogLevel: testCase.level, DatabaseURL: "postgres://localhost/test", DBMaxConns: 25, DBMaxIdle: 5}
 			err := cfg.validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("level=%q: wantErr=%v, got %v", tt.level, tt.wantErr, err)
+			if (err != nil) != testCase.wantErr {
+				t.Errorf("level=%q: wantErr=%v, got %v", testCase.level, testCase.wantErr, err)
 			}
 		})
 	}

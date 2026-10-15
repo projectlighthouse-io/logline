@@ -9,15 +9,16 @@ import (
 
 // ComputeETags walks the filesystem and computes a quoted SHA-256 ETag
 // for each file. the returned map is keyed by the file path relative
-// to the root of fsys (e.g. "static/css/style.css").
+// to the root of fsys. pass the fs.Sub view rooted at static/, so keys
+// look like "css/style.css" -- the path left after StripPrefix("/static/").
 func ComputeETags(fsys fs.FS) (map[string]string, error) {
 	etags := make(map[string]string)
 
-	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
+		if entry.IsDir() {
 			return nil
 		}
 

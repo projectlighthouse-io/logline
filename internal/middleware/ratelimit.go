@@ -1,12 +1,15 @@
 package middleware
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"logline/internal/auth"
+	"logline/internal/domain"
 
 	"golang.org/x/time/rate"
 )
@@ -18,36 +21,34 @@ type RateLimiterStore struct {
 }
 
 func NewRateLimiterStore(r float64, burst int, cleanupInterval time.Duration) *RateLimiterStore {
-	s := &RateLimiterStore{
+	limiterStore := &RateLimiterStore{
 		rate:  rate.Limit(r),
 		burst: burst,
 	}
 
-	go s.cleanup(cleanupInterval)
+	go limiterStore.cleanup(cleanupInterval)
 
-	return s
+	return limiterStore
 }
 
 type entry struct {
 	limiter  *rate.Limiter
-	lastSeen time.Time
+	lastSeen atomic.Int64 // unix nanoseconds; written by every request, read by cleanup
 }
 
 func (s *RateLimiterStore) getLimiter(key string) *rate.Limiter {
 	now := time.Now()
 
-	if v, ok := s.limiters.Load(key); ok {
-		e := v.(*entry)
-		e.lastSeen = now
-		return e.limiter
+	if cached, ok := s.limiters.Load(key); ok {
+		existing := cached.(*entry)
+		existing.lastSeen.Store(now.UnixNano())
+		return existing.limiter
 	}
 
-	e := &entry{
-		limiter:  rate.NewLimiter(s.rate, s.burst),
-		lastSeen: now,
-	}
+	created := &entry{limiter: rate.NewLimiter(s.rate, s.burst)}
+	created.lastSeen.Store(now.UnixNano())
 
-	actual, _ := s.limiters.LoadOrStore(key, e)
+	actual, _ := s.limiters.LoadOrStore(key, created)
 	return actual.(*entry).limiter
 }
 
@@ -57,10 +58,10 @@ func (s *RateLimiterStore) cleanup(interval time.Duration) {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		cutoff := time.Now().Add(-10 * time.Minute)
+		cutoff := time.Now().Add(-10 * time.Minute).UnixNano()
 		s.limiters.Range(func(key, value any) bool {
-			e := value.(*entry)
-			if e.lastSeen.Before(cutoff) {
+			current := value.(*entry)
+			if current.lastSeen.Load() < cutoff {
 				s.limiters.Delete(key)
 			}
 			return true
@@ -68,28 +69,36 @@ func (s *RateLimiterStore) cleanup(interval time.Duration) {
 	}
 }
 
-func RateLimit(store *RateLimiterStore) func(http.Handler) http.Handler {
+func RateLimit(limiterStore *RateLimiterStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := auth.KeyFromContext(r.Context())
 			if apiKey == nil {
-				http.Error(w, `{"error":"missing api key"}`, http.StatusUnauthorized)
+				writeError(w, http.StatusUnauthorized, "missing api key")
 				return
 			}
 
-			limiter := store.getLimiter(apiKey.KeyPrefix)
+			limiter := limiterStore.getLimiter(apiKey.KeyPrefix)
 
 			if !limiter.Allow() {
-				retryAfter := int(1.0 / float64(store.rate))
+				retryAfter := int(1.0 / float64(limiterStore.rate))
 				if retryAfter < 1 {
 					retryAfter = 1
 				}
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
-				http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+				writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// writeError sends a JSON error body with the same shape as every handler's errors.
+// http.Error would force Content-Type: text/plain.
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(domain.ErrorResponse{Error: message})
 }

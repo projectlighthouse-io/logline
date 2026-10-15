@@ -53,15 +53,15 @@ func setupUserTestDB(t *testing.T) *sql.DB {
 
 // replicates sha256 hex hashing for test data manipulation
 func hashTokenForTest(token string) string {
-	h := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(h[:])
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
 
 func TestCreateUser_Success(t *testing.T) {
 	db := setupUserTestDB(t)
-	store := auth.NewUserStore(db)
+	userStore := auth.NewUserStore(db)
 
-	user, err := store.Create(context.Background(), "test@example.com", "securepassword", "Test User")
+	user, err := userStore.Create(context.Background(), "test@example.com", "securepassword", "Test User")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -88,15 +88,15 @@ func TestCreateUser_Success(t *testing.T) {
 
 func TestCreateUser_DuplicateEmail(t *testing.T) {
 	db := setupUserTestDB(t)
-	store := auth.NewUserStore(db)
+	userStore := auth.NewUserStore(db)
 	ctx := context.Background()
 
-	_, err := store.Create(ctx, "dupe@example.com", "password123", "First")
+	_, err := userStore.Create(ctx, "dupe@example.com", "password123", "First")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = store.Create(ctx, "dupe@example.com", "password456", "Second")
+	_, err = userStore.Create(ctx, "dupe@example.com", "password456", "Second")
 	if err == nil {
 		t.Fatal("expected error for duplicate email")
 	}
@@ -110,9 +110,9 @@ func TestCreateUser_ShortPassword(t *testing.T) {
 	// password length validation is in the handler, not the store.
 	// the store itself does not reject short passwords.
 	db := setupUserTestDB(t)
-	store := auth.NewUserStore(db)
+	userStore := auth.NewUserStore(db)
 
-	user, err := store.Create(context.Background(), "short@example.com", "short", "Short Pass")
+	user, err := userStore.Create(context.Background(), "short@example.com", "short", "Short Pass")
 	if err != nil {
 		t.Fatalf("store should not reject short passwords (handler's job), got %v", err)
 	}
@@ -123,9 +123,9 @@ func TestCreateUser_ShortPassword(t *testing.T) {
 
 func TestGetByEmail_NotFound(t *testing.T) {
 	db := setupUserTestDB(t)
-	store := auth.NewUserStore(db)
+	userStore := auth.NewUserStore(db)
 
-	_, err := store.GetByEmail(context.Background(), "nonexistent@example.com")
+	_, err := userStore.GetByEmail(context.Background(), "nonexistent@example.com")
 	if err == nil {
 		t.Fatal("expected error for nonexistent email")
 	}
@@ -133,9 +133,9 @@ func TestGetByEmail_NotFound(t *testing.T) {
 
 func TestVerifyPassword_Correct(t *testing.T) {
 	db := setupUserTestDB(t)
-	store := auth.NewUserStore(db)
+	userStore := auth.NewUserStore(db)
 
-	user, err := store.Create(context.Background(), "verify@example.com", "correctpassword", "Verify")
+	user, err := userStore.Create(context.Background(), "verify@example.com", "correctpassword", "Verify")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,9 +147,9 @@ func TestVerifyPassword_Correct(t *testing.T) {
 
 func TestVerifyPassword_Wrong(t *testing.T) {
 	db := setupUserTestDB(t)
-	store := auth.NewUserStore(db)
+	userStore := auth.NewUserStore(db)
 
-	user, err := store.Create(context.Background(), "wrong@example.com", "correctpassword", "Wrong")
+	user, err := userStore.Create(context.Background(), "wrong@example.com", "correctpassword", "Wrong")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,8 +398,8 @@ func TestMiddleware_ExpiredSession_ClearsCookie(t *testing.T) {
 
 	cookies := rec.Result().Cookies()
 	var found bool
-	for _, c := range cookies {
-		if c.Name == "session_token" && c.MaxAge < 0 {
+	for _, cookie := range cookies {
+		if cookie.Name == "session_token" && cookie.MaxAge < 0 {
 			found = true
 			break
 		}
@@ -410,7 +410,7 @@ func TestMiddleware_ExpiredSession_ClearsCookie(t *testing.T) {
 }
 
 // simplified version of the server's requireSession for testing the auth layer
-func requireSessionTestMiddleware(ss *auth.SessionStore) func(http.Handler) http.Handler {
+func requireSessionTestMiddleware(sessionStore *auth.SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			cookie, err := r.Cookie("session_token")
@@ -419,7 +419,7 @@ func requireSessionTestMiddleware(ss *auth.SessionStore) func(http.Handler) http
 				return
 			}
 
-			_, _, err = ss.Validate(r.Context(), cookie.Value)
+			_, _, err = sessionStore.Validate(r.Context(), cookie.Value)
 			if err != nil {
 				http.SetCookie(w, &http.Cookie{
 					Name:     "session_token",

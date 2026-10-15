@@ -53,18 +53,18 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 func TestQueryLogs_FilterByLevel(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
-	for _, lvl := range []string{"error", "error", "error", "info", "info"} {
-		if err := s.InsertLog(ctx, domain.LogEntry{
-			Level: lvl, Message: "test", Service: "api", Timestamp: time.Now(),
+	for _, level := range []string{"error", "error", "error", "info", "info"} {
+		if err := logStore.InsertLog(ctx, domain.LogEntry{
+			Level: level, Message: "test", Service: "api", Timestamp: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	results, err := s.QueryLogs(ctx, store.LogFilter{Level: "error", Limit: 50})
+	results, err := logStore.QueryLogs(ctx, store.LogFilter{Level: "error", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,20 +73,20 @@ func TestQueryLogs_FilterByLevel(t *testing.T) {
 		t.Errorf("expected 3 errors, got %d", len(results))
 	}
 
-	for _, r := range results {
-		if r.Level != "error" {
-			t.Errorf("expected level error, got %q", r.Level)
+	for _, row := range results {
+		if row.Level != "error" {
+			t.Errorf("expected level error, got %q", row.Level)
 		}
 	}
 }
 
 func TestQueryLogs_CursorPagination(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
 	for i := 0; i < 20; i++ {
-		if err := s.InsertLog(ctx, domain.LogEntry{
+		if err := logStore.InsertLog(ctx, domain.LogEntry{
 			Level: "info", Message: fmt.Sprintf("entry %d", i),
 			Service: "api", Timestamp: time.Now(),
 		}); err != nil {
@@ -94,7 +94,7 @@ func TestQueryLogs_CursorPagination(t *testing.T) {
 		}
 	}
 
-	page1, err := s.QueryLogs(ctx, store.LogFilter{Limit: 5})
+	page1, err := logStore.QueryLogs(ctx, store.LogFilter{Limit: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestQueryLogs_CursorPagination(t *testing.T) {
 	}
 
 	cursor := page1[len(page1)-1].ID
-	page2, err := s.QueryLogs(ctx, store.LogFilter{Cursor: cursor, Limit: 5})
+	page2, err := logStore.QueryLogs(ctx, store.LogFilter{Cursor: cursor, Limit: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,23 +119,23 @@ func TestQueryLogs_CursorPagination(t *testing.T) {
 
 func TestQueryLogs_FullTextSearch(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
-	if err := s.InsertLog(ctx, domain.LogEntry{
+	if err := logStore.InsertLog(ctx, domain.LogEntry{
 		Level: "error", Message: "connection refused to downstream",
 		Service: "gateway", Timestamp: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.InsertLog(ctx, domain.LogEntry{
+	if err := logStore.InsertLog(ctx, domain.LogEntry{
 		Level: "info", Message: "request processed successfully",
 		Service: "gateway", Timestamp: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	results, err := s.QueryLogs(ctx, store.LogFilter{Query: "connection refused", Limit: 50})
+	results, err := logStore.QueryLogs(ctx, store.LogFilter{Query: "connection refused", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,25 +151,25 @@ func TestQueryLogs_FullTextSearch(t *testing.T) {
 
 func TestListServices(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
-	for _, svc := range []string{"gateway", "api", "worker"} {
-		if err := s.InsertLog(ctx, domain.LogEntry{
-			Level: "info", Message: "test", Service: svc, Timestamp: time.Now(),
+	for _, service := range []string{"gateway", "api", "worker"} {
+		if err := logStore.InsertLog(ctx, domain.LogEntry{
+			Level: "info", Message: "test", Service: service, Timestamp: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// duplicate to verify DISTINCT works
-	if err := s.InsertLog(ctx, domain.LogEntry{
+	if err := logStore.InsertLog(ctx, domain.LogEntry{
 		Level: "error", Message: "test", Service: "api", Timestamp: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	services, err := s.ListServices(ctx)
+	services, err := logStore.ListServices(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,27 +179,27 @@ func TestListServices(t *testing.T) {
 		t.Fatalf("expected %d services, got %d: %v", len(expected), len(services), services)
 	}
 
-	for i, svc := range expected {
-		if services[i] != svc {
-			t.Errorf("expected services[%d] = %q, got %q", i, svc, services[i])
+	for i, service := range expected {
+		if services[i] != service {
+			t.Errorf("expected services[%d] = %q, got %q", i, service, services[i])
 		}
 	}
 }
 
 func TestQueryLogs_FilterByService(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
-	for _, svc := range []string{"api", "api", "api", "gateway", "gateway"} {
-		if err := s.InsertLog(ctx, domain.LogEntry{
-			Level: "info", Message: "test", Service: svc, Timestamp: time.Now(),
+	for _, service := range []string{"api", "api", "api", "gateway", "gateway"} {
+		if err := logStore.InsertLog(ctx, domain.LogEntry{
+			Level: "info", Message: "test", Service: service, Timestamp: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	results, err := s.QueryLogs(ctx, store.LogFilter{Service: "api", Limit: 50})
+	results, err := logStore.QueryLogs(ctx, store.LogFilter{Service: "api", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,16 +208,16 @@ func TestQueryLogs_FilterByService(t *testing.T) {
 		t.Errorf("expected 3 api logs, got %d", len(results))
 	}
 
-	for _, r := range results {
-		if r.Service != "api" {
-			t.Errorf("expected service api, got %q", r.Service)
+	for _, row := range results {
+		if row.Service != "api" {
+			t.Errorf("expected service api, got %q", row.Service)
 		}
 	}
 }
 
 func TestQueryLogs_DateRange(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
 	// insert logs at different times
@@ -229,10 +229,10 @@ func TestQueryLogs_DateRange(t *testing.T) {
 		time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
 	}
 
-	for i, ts := range times {
-		if err := s.InsertLog(ctx, domain.LogEntry{
+	for i, timestamp := range times {
+		if err := logStore.InsertLog(ctx, domain.LogEntry{
 			Level: "info", Message: fmt.Sprintf("entry %d", i),
-			Service: "api", Timestamp: ts,
+			Service: "api", Timestamp: timestamp,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -242,7 +242,7 @@ func TestQueryLogs_DateRange(t *testing.T) {
 	from := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 28, 23, 59, 59, 0, time.UTC)
 
-	results, err := s.QueryLogs(ctx, store.LogFilter{From: from, To: to, Limit: 50})
+	results, err := logStore.QueryLogs(ctx, store.LogFilter{From: from, To: to, Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,18 +254,18 @@ func TestQueryLogs_DateRange(t *testing.T) {
 
 func TestQueryLogs_NoFilters(t *testing.T) {
 	db := setupTestDB(t)
-	s := store.New(db)
+	logStore := store.New(db)
 	ctx := context.Background()
 
 	for i := 0; i < 10; i++ {
-		if err := s.InsertLog(ctx, domain.LogEntry{
+		if err := logStore.InsertLog(ctx, domain.LogEntry{
 			Level: "info", Message: "test", Service: "api", Timestamp: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	results, err := s.QueryLogs(ctx, store.LogFilter{Limit: 50})
+	results, err := logStore.QueryLogs(ctx, store.LogFilter{Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}

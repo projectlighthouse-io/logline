@@ -64,7 +64,7 @@ var (
 func main() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://logline:password@localhost:5433/logline?sslmode=disable"
+		dsn = "postgres://logline:password@localhost:5432/logline?sslmode=disable"
 	}
 
 	count := 5000
@@ -84,12 +84,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	s := store.New(db)
-	us := auth.NewUserStore(db)
-	aks := auth.NewApiKeyStore(db)
+	logStore := store.New(db)
+	userStore := auth.NewUserStore(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
 
 	// create admin user
-	_, err = us.Create(ctx, "platform-engineer@logline.test", "secret12", "Platform Engineer")
+	_, err = userStore.Create(ctx, "platform-engineer@logline.test", "secret12", "Platform Engineer")
 	if err != nil {
 		if auth.IsUniqueViolation(err) {
 			fmt.Println("admin user already exists, skipping")
@@ -102,25 +102,25 @@ func main() {
 	}
 
 	// create API keys for each service
-	for _, svc := range services {
-		key, err := aks.Create(ctx, svc+"-prod", svc)
+	for _, service := range services {
+		key, err := apiKeyStore.Create(ctx, service+"-prod", service)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "create key for %s: %v\n", svc, err)
+			fmt.Fprintf(os.Stderr, "create key for %s: %v\n", service, err)
 			continue
 		}
-		fmt.Printf("created API key for %s: %s\n", svc, key)
+		fmt.Printf("created API key for %s: %s\n", service, key)
 	}
 
 	fmt.Printf("\nseeding %d log entries...\n", count)
 	start := time.Now()
 
 	for i := 0; i < count; i += batchSize {
-		n := batchSize
-		if i+n > count {
-			n = count - i
+		currentBatch := batchSize
+		if i+currentBatch > count {
+			currentBatch = count - i
 		}
 
-		entries := make([]domain.LogEntry, n)
+		entries := make([]domain.LogEntry, currentBatch)
 		for j := range entries {
 			level := levels[rand.Intn(len(levels))]
 			msgs := messages[level]
@@ -137,12 +137,12 @@ func main() {
 			}
 		}
 
-		if _, err := s.CopyFrom(ctx, entries); err != nil {
+		if _, err := logStore.CopyFrom(ctx, entries); err != nil {
 			fmt.Fprintf(os.Stderr, "copy: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Printf("  %d/%d\n", i+n, count)
+		fmt.Printf("  %d/%d\n", i+currentBatch, count)
 	}
 
 	fmt.Printf("done in %s\n", time.Since(start).Round(time.Millisecond))

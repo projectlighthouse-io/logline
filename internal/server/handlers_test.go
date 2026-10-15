@@ -17,6 +17,7 @@ import (
 	"logline/internal/auth"
 	"logline/internal/config"
 	"logline/internal/database"
+	"logline/internal/domain"
 	"logline/internal/store"
 )
 
@@ -74,18 +75,18 @@ func setupTestDB(t *testing.T) *sql.DB {
 func newTestServer(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
 	db := setupTestDB(t)
-	s := store.New(db)
-	aks := auth.NewApiKeyStore(db)
-	us := auth.NewUserStore(db)
-	ss := auth.NewSessionStore(db)
-	return New(testConfig(), testLogger(), s, aks, us, ss), db
+	logStore := store.New(db)
+	apiKeyStore := auth.NewApiKeyStore(db)
+	userStore := auth.NewUserStore(db)
+	sessionStore := auth.NewSessionStore(db)
+	return New(testConfig(), testLogger(), logStore, apiKeyStore, userStore, sessionStore), db
 }
 
 // creates an API key for the given service and returns the raw key
 func createTestKey(t *testing.T, db *sql.DB, service string) string {
 	t.Helper()
-	aks := auth.NewApiKeyStore(db)
-	rawKey, err := aks.Create(context.Background(), "test-key", service)
+	apiKeyStore := auth.NewApiKeyStore(db)
+	rawKey, err := apiKeyStore.Create(context.Background(), "test-key", service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +105,8 @@ func TestHandleHealth_OK(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
-	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
-		t.Errorf("expected Content-Type application/json, got %q", ct)
+	if contentType := rec.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", contentType)
 	}
 }
 
@@ -168,108 +169,163 @@ func TestReadyEndpoint_ShuttingDown(t *testing.T) {
 	}
 }
 
+func newIngestRequest(t *testing.T, apiKey, body string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	return req
+}
+
+func assertStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if rec.Code != want {
+		t.Errorf("status = %d, want %d", rec.Code, want)
+	}
+}
+
+func decodeJSON[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
+	t.Helper()
+	var decoded T
+	if err := json.NewDecoder(rec.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decoding response body: %v", err)
+	}
+	return decoded
+}
+
 func TestIngestValidEntry(t *testing.T) {
 	srv, db := newTestServer(t)
+	key := createTestKey(t, db, "auth")
 
-	// create an API key for the "auth" service
-	aks := auth.NewApiKeyStore(db)
-	rawKey, err := aks.Create(context.Background(), "test-key", "auth")
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := `{
+		"level": "error",
+		"message": "connection refused",
+		"service": "auth",
+		"timestamp": "2026-02-27T14:30:00Z"
+	}`
 
-	payload := `{"level":"error","message":"connection refused","service":"auth","timestamp":"2026-02-27T14:30:00Z"}`
-	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+rawKey)
+	req := newIngestRequest(t, key, body)
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Errorf("expected status 201, got %d", rec.Code)
-	}
-}
+	assertStatus(t, rec, http.StatusCreated)
+	resp := decodeJSON[domain.StatusResponse](t, rec)
 
-func TestIngestWrongContentType(t *testing.T) {
-	srv, db := newTestServer(t)
-	key := createTestKey(t, db, "api")
-
-	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader("not json"))
-	req.Header.Set("Content-Type", "text/plain")
-	req.Header.Set("Authorization", "Bearer "+key)
-	rec := httptest.NewRecorder()
-
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnsupportedMediaType {
-		t.Errorf("expected status 415, got %d", rec.Code)
+	if resp.Status != "accepted" {
+		t.Errorf("status = %q, want %q", resp.Status, "accepted")
 	}
 }
 
-func TestIngestEmptyBody(t *testing.T) {
+func TestIngest_Errors(t *testing.T) {
 	srv, db := newTestServer(t)
-	key := createTestKey(t, db, "api")
+	key := createTestKey(t, db, "web")
 
-	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(""))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key)
-	rec := httptest.NewRecorder()
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+		wantStatus  int
+		wantErr     string
+	}{
+		{
+			name:        "wrong content-type",
+			contentType: "text/plain",
+			body:        `{"level":"info","message":"hi","service":"web","timestamp":"2026-02-27T14:30:00Z"}`,
+			wantStatus:  http.StatusUnsupportedMediaType,
+			wantErr:     "content-type must be application/json",
+		},
+		{
+			name:        "empty body",
+			contentType: "application/json",
+			body:        "",
+			wantStatus:  http.StatusBadRequest,
+			wantErr:     "invalid JSON",
+		},
+		{
+			name:        "invalid json",
+			contentType: "application/json",
+			body:        `{not json}`,
+			wantStatus:  http.StatusBadRequest,
+			wantErr:     "invalid JSON",
+		},
+		{
+			name:        "missing level",
+			contentType: "application/json",
+			body:        `{"message":"hi","service":"web","timestamp":"2026-02-27T14:30:00Z"}`,
+			wantStatus:  http.StatusBadRequest,
+			wantErr:     "level is required",
+		},
+		{
+			name:        "missing message",
+			contentType: "application/json",
+			body:        `{"level":"info","service":"web","timestamp":"2026-02-27T14:30:00Z"}`,
+			wantStatus:  http.StatusBadRequest,
+			wantErr:     "message is required",
+		},
+		{
+			name:        "missing service",
+			contentType: "application/json",
+			body:        `{"level":"info","message":"hi","timestamp":"2026-02-27T14:30:00Z"}`,
+			wantStatus:  http.StatusBadRequest,
+			wantErr:     "service is required",
+		},
+		{
+			name:        "invalid level value",
+			contentType: "application/json",
+			body:        `{"level":"critical","message":"hi","service":"web","timestamp":"2026-02-27T14:30:00Z"}`,
+			wantStatus:  http.StatusBadRequest,
+			wantErr:     "level must be one of",
+		},
+	}
 
-	srv.ServeHTTP(rec, req)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(testCase.body))
+			req.Header.Set("Content-Type", testCase.contentType)
+			req.Header.Set("Authorization", "Bearer "+key)
+			rec := httptest.NewRecorder()
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != testCase.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, testCase.wantStatus)
+			}
+
+			var errResp domain.ErrorResponse
+			if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+				t.Fatalf("decoding error response: %v", err)
+			}
+
+			if !strings.Contains(errResp.Error, testCase.wantErr) {
+				t.Errorf("error = %q, want substring %q", errResp.Error, testCase.wantErr)
+			}
+		})
 	}
 }
 
-func TestIngestInvalidJSON(t *testing.T) {
-	srv, db := newTestServer(t)
-	key := createTestKey(t, db, "api")
+func TestHandleIngest_ServiceScopeFromContext(t *testing.T) {
+	srv, _ := newTestServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader("definitely not json"))
+	body := `{
+		"level": "info",
+		"message": "test",
+		"service": "payments",
+		"timestamp": "2026-02-27T14:30:00Z"
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key)
+
+	key := &auth.ApiKey{Name: "billing-key", Service: "billing"}
+	ctx := context.WithValue(req.Context(), auth.ApiKeyContextKey, key)
+	req = req.WithContext(ctx)
+
 	rec := httptest.NewRecorder()
+	srv.handleIngest(rec, req)
 
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
-	}
-}
-
-func TestIngestMissingRequiredFields(t *testing.T) {
-	srv, db := newTestServer(t)
-	key := createTestKey(t, db, "api")
-
-	payload := `{"level":"error"}`
-	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key)
-	rec := httptest.NewRecorder()
-
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
-	}
-}
-
-func TestIngestInvalidLevel(t *testing.T) {
-	srv, db := newTestServer(t)
-	key := createTestKey(t, db, "api")
-
-	payload := `{"level":"critical","message":"test","service":"api","timestamp":"2026-02-27T14:30:00Z"}`
-	req := httptest.NewRequest(http.MethodPost, "/ingest", strings.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key)
-	rec := httptest.NewRecorder()
-
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
 }
 

@@ -34,7 +34,7 @@ var (
 func main() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://logline:password@localhost:5433/logline?sslmode=disable"
+		dsn = "postgres://logline:password@localhost:5432/logline?sslmode=disable"
 	}
 
 	db, err := sql.Open("pgx", dsn)
@@ -51,7 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	s := store.New(db)
+	logStore := store.New(db)
 
 	// seed 500,000 rows
 	total := 500_000
@@ -66,12 +66,12 @@ func main() {
 		start := time.Now()
 
 		for i := 0; i < total; i += batchSize {
-			n := batchSize
-			if i+n > total {
-				n = total - i
+			currentBatch := batchSize
+			if i+currentBatch > total {
+				currentBatch = total - i
 			}
 
-			entries := make([]domain.LogEntry, n)
+			entries := make([]domain.LogEntry, currentBatch)
 			for j := range entries {
 				entries[j] = domain.LogEntry{
 					Level:     levels[rand.Intn(len(levels))],
@@ -82,7 +82,7 @@ func main() {
 				}
 			}
 
-			if _, err := s.CopyFrom(ctx, entries); err != nil {
+			if _, err := logStore.CopyFrom(ctx, entries); err != nil {
 				fmt.Fprintf(os.Stderr, "copy: %v\n", err)
 				os.Exit(1)
 			}
@@ -97,15 +97,15 @@ func main() {
 
 	// benchmark: full-text search WITHOUT GIN index
 	fmt.Println("=== search WITHOUT GIN index ===")
-	db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_logs_message_fts")
+	db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_logs_message_search")
 
 	searchQuery := "connection refused"
-	runSearch(s, ctx, searchQuery, 5)
+	runSearch(logStore, ctx, searchQuery, 5)
 
 	// create GIN index
 	fmt.Println("\ncreating GIN index on to_tsvector('english', message)...")
 	idxStart := time.Now()
-	_, err = db.ExecContext(ctx, "CREATE INDEX idx_logs_message_fts ON logs USING gin(to_tsvector('english', message))")
+	_, err = db.ExecContext(ctx, "CREATE INDEX idx_logs_message_search ON logs USING gin(to_tsvector('english', message))")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create index: %v\n", err)
 		os.Exit(1)
@@ -114,32 +114,31 @@ func main() {
 
 	// benchmark: full-text search WITH GIN index
 	fmt.Println("=== search WITH GIN index ===")
-	runSearch(s, ctx, searchQuery, 5)
+	runSearch(logStore, ctx, searchQuery, 5)
 
-	// cleanup
-	db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_logs_message_fts")
+	// no cleanup: the index we just rebuilt is the one the migrations own, so leave it in place
 }
 
-func runSearch(s *store.Store, ctx context.Context, query string, runs int) {
+func runSearch(logStore *store.Store, ctx context.Context, query string, runs int) {
 	var total time.Duration
 
 	for i := 0; i < runs; i++ {
 		start := time.Now()
-		results, err := s.QueryLogs(ctx, store.LogFilter{
+		results, err := logStore.QueryLogs(ctx, store.LogFilter{
 			Query: query,
 			Limit: 50,
 		})
-		d := time.Since(start)
-		total += d
+		elapsed := time.Since(start)
+		total += elapsed
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  run %d: error: %v\n", i+1, err)
 			continue
 		}
 
-		fmt.Printf("  run %d: %d results in %s\n", i+1, len(results), d.Round(time.Microsecond))
+		fmt.Printf("  run %d: %d results in %s\n", i+1, len(results), elapsed.Round(time.Microsecond))
 	}
 
-	avg := total / time.Duration(runs)
-	fmt.Printf("  avg: %s\n", avg.Round(time.Microsecond))
+	average := total / time.Duration(runs)
+	fmt.Printf("  avg: %s\n", average.Round(time.Microsecond))
 }

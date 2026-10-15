@@ -26,10 +26,10 @@ type Config struct {
 
 func LoadConfig() (Config, error) {
 	cfg := Config{
-		Port:        4000,
-		Env:         "development",
-		LogLevel:    "info",
-		DatabaseURL: "postgres://logline:password@localhost:5433/logline?sslmode=disable",
+		Port:           4000,
+		Env:            "development",
+		LogLevel:       "info",
+		DatabaseURL:    "postgres://logline:password@localhost:5432/logline?sslmode=disable",
 		DBMaxConns:     25,
 		DBMaxIdle:      5,
 		RateLimit:      100,
@@ -52,67 +52,67 @@ func LoadConfig() (Config, error) {
 }
 
 func (c *Config) loadEnv() {
-	if v := os.Getenv("PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			c.Port = p
+	if value := os.Getenv("PORT"); value != "" {
+		if port, err := strconv.Atoi(value); err == nil {
+			c.Port = port
 		}
 	}
 
-	if v := os.Getenv("APP_ENV"); v != "" {
-		c.Env = v
+	if value := os.Getenv("APP_ENV"); value != "" {
+		c.Env = value
 	}
 
-	if v := os.Getenv("LOG_LEVEL"); v != "" {
-		c.LogLevel = v
+	if value := os.Getenv("LOG_LEVEL"); value != "" {
+		c.LogLevel = value
 	}
 
-	if v := os.Getenv("DATABASE_URL"); v != "" {
-		c.DatabaseURL = v
+	if value := os.Getenv("DATABASE_URL"); value != "" {
+		c.DatabaseURL = value
 	}
 
-	if v := os.Getenv("DB_MAX_CONNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.DBMaxConns = n
+	if value := os.Getenv("DB_MAX_CONNS"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			c.DBMaxConns = parsed
 		}
 	}
 
-	if v := os.Getenv("DB_MAX_IDLE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.DBMaxIdle = n
+	if value := os.Getenv("DB_MAX_IDLE"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			c.DBMaxIdle = parsed
 		}
 	}
 
-	if v := os.Getenv("RATE_LIMIT"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.RateLimit = f
+	if value := os.Getenv("RATE_LIMIT"); value != "" {
+		if rateLimit, err := strconv.ParseFloat(value, 64); err == nil {
+			c.RateLimit = rateLimit
 		}
 	}
 
-	if v := os.Getenv("RATE_LIMIT_BURST"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.RateLimitBurst = n
+	if value := os.Getenv("RATE_LIMIT_BURST"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			c.RateLimitBurst = parsed
 		}
 	}
 
-	if v := os.Getenv("CORS_ORIGINS"); v != "" {
-		c.CORSOrigins = strings.Split(v, ",")
+	if value := os.Getenv("CORS_ORIGINS"); value != "" {
+		c.CORSOrigins = strings.Split(value, ",")
 	}
 
-	if v := os.Getenv("RETENTION_DAYS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.RetentionDays = n
+	if value := os.Getenv("RETENTION_DAYS"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			c.RetentionDays = parsed
 		}
 	}
 }
 
 func (c *Config) loadFlags() error {
-	fs := flag.NewFlagSet("logline", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("logline", flag.ContinueOnError)
 
-	fs.IntVar(&c.Port, "port", c.Port, "HTTP server port")
-	fs.StringVar(&c.Env, "env", c.Env, "Environment (development, production)")
-	fs.StringVar(&c.LogLevel, "log-level", c.LogLevel, "Log level (debug, info, warn, error)")
+	flagSet.IntVar(&c.Port, "port", c.Port, "HTTP server port")
+	flagSet.StringVar(&c.Env, "env", c.Env, "Environment (development, production)")
+	flagSet.StringVar(&c.LogLevel, "log-level", c.LogLevel, "Log level (debug, info, warn, error)")
 
-	return fs.Parse(os.Args[1:])
+	return flagSet.Parse(os.Args[1:])
 }
 
 func (c *Config) validate() error {
